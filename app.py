@@ -118,6 +118,11 @@ def show_reminders(plan_key, title, event, alerts):
                 st.toast(latest_due[1], icon="🔔")
         if latest_due and (now - latest_due[0]).total_seconds() < 60:
             st.warning(latest_due[1])
+            voice = st.session_state.get(f"{plan_key}_voice")
+            if latest_due[0] == departure and voice:
+                audio_bytes, audio_format = voice
+                st.audio(audio_bytes, format=audio_format, autoplay=True)
+
         st.caption("알림은 앱을 열어둔 동안 화면에 표시됩니다.")
 
 
@@ -186,34 +191,36 @@ def show_commute_weather(plan_key):
     st.caption("출처 · [Open-Meteo](https://open-meteo.com/)")
 
 
-commute_tab, work_tab = st.tabs(["출근", "퇴근"])
-with commute_tab:
-    with st.expander("출발 시각 계산", expanded=True):
-        defaults = st.session_state.get(
-            "departure_defaults", {"대중교통": 35, "자가용": 30, "buffer": 10}
-        )
-        with st.form("departure_calculator"):
-            transport = st.radio("이동수단", ["대중교통", "자가용"], horizontal=True)
-            arrival_date = st.date_input("목표 도착 날짜", value=datetime.now(KST).date())
-            arrival = st.time_input("목표 도착 시각", value=time(9, 0), step=60)
-            calculated = st.form_submit_button("출발 시각 계산")
-        if calculated:
-            travel = defaults[transport]
-            buffer = defaults["buffer"]
-            arrival_at = datetime.combine(arrival_date, arrival, tzinfo=KST)
-            departure = arrival_at - timedelta(minutes=travel + buffer)
-            prefix = "전날 " if departure.date() < arrival_at.date() else ""
-            st.session_state.departure_result = (
-                departure,
-                f"**{prefix}{departure:%H:%M} 출발**",
-                f"목표 {arrival:%H:%M} · {transport} 평소 {travel}분 · 여유 {buffer}분",
+def show_voice_settings(plan_key):
+    voice_key = f"{plan_key}_voice"
+    with st.expander("🎙️ 미래의 나에게 알람"):
+        st.caption("정각에 재생할 한마디를 녹음하거나 음성 파일로 올리세요.")
+        with st.form(f"{plan_key}_voice_form", clear_on_submit=True):
+            recording = st.audio_input("직접 녹음", key=f"{plan_key}_recording")
+            upload = st.file_uploader(
+                "또는 음성 파일 올리기", type=["mp3", "wav"], key=f"{plan_key}_upload"
             )
-            if st.session_state.get("departure_result_alerts_started") is not None:
-                st.session_state.departure_result_alerts_started = datetime.now(KST)
-            st.session_state.pop("departure_result_last_alert", None)
-    show_reminders("departure_result", "출근 계획", "출발", DEPARTURE_ALERTS)
-    show_commute_weather("departure_result")
+            saved = st.form_submit_button("알림 음성 저장")
+        if saved:
+            source = upload if upload is not None else recording
+            if source is None or source.size == 0:
+                st.warning("녹음하거나 음성 파일을 올려 주세요.")
+            elif source.size > 5 * 1024 * 1024:
+                st.warning("5MB 이하의 음성을 사용해 주세요.")
+            else:
+                audio_format = "audio/mpeg" if source.name.lower().endswith(".mp3") else "audio/wav"
+                st.session_state[voice_key] = (source.getvalue(), audio_format)
+                st.success("알림 음성을 저장했어요.")
+        if st.button("저장한 음성 지우기", key=f"{plan_key}_remove_voice",
+                     disabled=voice_key not in st.session_state):
+            st.session_state.pop(voice_key, None)
+        if voice_key in st.session_state:
+            st.caption("미리 듣기")
+            audio_bytes, audio_format = st.session_state[voice_key]
+            st.audio(audio_bytes, format=audio_format)
 
+
+commute_tab, work_tab = st.tabs(["출근", "퇴근"])
 with work_tab:
     with st.expander("퇴근·야근 알림 설정"):
         with st.form("work_end_schedule"):
@@ -244,6 +251,77 @@ with work_tab:
         st.info("야근 중 · 퇴근 시각 미정. 새 시각을 저장하면 퇴근 알림을 다시 시작할 수 있어요.")
     show_reminders("work_end_result", "퇴근 계획", "퇴근", WORK_END_ALERTS)
     show_commute_weather("work_end_result")
+    show_voice_settings("work_end_result")
+
+    with st.container(border=True):
+        st.markdown("**🏁 퇴근 도장**")
+        today = datetime.now(KST).date()
+        stamp = st.session_state.get("work_end_stamp")
+        stamped_today = stamp is not None and stamp[0] == today
+        if st.button("오늘 업무 종료", disabled=stamped_today):
+            plan = st.session_state.get("work_end_result")
+            overtime = st.session_state.get("work_end_pending") or (
+                plan is not None and plan[2].startswith("야근 확정")
+            )
+            stamp = (today, "연장전 종료" if overtime else "오늘도 무사 퇴근")
+            st.session_state.work_end_stamp = stamp
+            st.rerun()
+        if stamped_today:
+            st.success(f"🏁 {stamp[1]} · {stamp[0]:%m/%d}")
+
+    with st.expander("📦 내일의 나에게 인수인계"):
+        with st.form("work_handoff_form", clear_on_submit=True):
+            note = st.text_input("다음 출근 때 제일 먼저 할 일", max_chars=200)
+            saved = st.form_submit_button("인수인계 메모 저장")
+        if saved:
+            if note.strip():
+                st.session_state.next_work_handoff = note.strip()
+                st.success("출근 탭에 메모를 남겼어요.")
+            else:
+                st.warning("남길 일을 한 줄 입력해 주세요.")
+        if st.session_state.get("next_work_handoff"):
+            st.caption("저장한 메모")
+            st.text(st.session_state.next_work_handoff)
+        st.caption("메모는 현재 앱 세션에 보관됩니다.")
+
+
+with commute_tab:
+    with st.expander("출발 시각 계산", expanded=True):
+        defaults = st.session_state.get(
+            "departure_defaults", {"대중교통": 35, "자가용": 30, "buffer": 10}
+        )
+        with st.form("departure_calculator"):
+            transport = st.radio("이동수단", ["대중교통", "자가용"], horizontal=True)
+            arrival_date = st.date_input("목표 도착 날짜", value=datetime.now(KST).date())
+            arrival = st.time_input("목표 도착 시각", value=time(9, 0), step=60)
+            calculated = st.form_submit_button("출발 시각 계산")
+        if calculated:
+            travel = defaults[transport]
+            buffer = defaults["buffer"]
+            arrival_at = datetime.combine(arrival_date, arrival, tzinfo=KST)
+            departure = arrival_at - timedelta(minutes=travel + buffer)
+            prefix = "전날 " if departure.date() < arrival_at.date() else ""
+            st.session_state.departure_result = (
+                departure,
+                f"**{prefix}{departure:%H:%M} 출발**",
+                f"목표 {arrival:%H:%M} · {transport} 평소 {travel}분 · 여유 {buffer}분",
+            )
+            if st.session_state.get("departure_result_alerts_started") is not None:
+                st.session_state.departure_result_alerts_started = datetime.now(KST)
+            st.session_state.pop("departure_result_last_alert", None)
+    show_reminders("departure_result", "출근 계획", "출발", DEPARTURE_ALERTS)
+    show_commute_weather("departure_result")
+    show_voice_settings("departure_result")
+
+    handoff = st.session_state.get("next_work_handoff")
+    if handoff:
+        with st.container(border=True):
+            st.markdown("**📦 다음 출근에 볼 인수인계**")
+            st.text(handoff)
+            if st.button("메모 확인 완료"):
+                st.session_state.pop("next_work_handoff", None)
+                st.rerun()
+
 
 st.divider()
 st.subheader("음성 비서")
