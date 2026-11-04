@@ -1,5 +1,8 @@
 
+import json
 import os
+from urllib.parse import urlencode
+from urllib.request import urlopen
 from html import escape
 from datetime import datetime, time, timedelta, timezone
 
@@ -53,9 +56,19 @@ DEPARTURE_ALERTS = (
 )
 
 
+WORK_END_ALERTS = (
+    (15, "오늘 남은 업무와 내일로 넘길 일을 정리하세요."),
+    (10, "공유할 내용이나 인수인계가 있는지 확인하세요."),
+    (5, "작업을 저장하고 퇴근 준비를 마무리하세요."),
+    (0, "김대리님, 설정한 퇴근 시각이에요."),
+)
+
+
 @st.fragment(run_every="1s")
-def show_departure_reminders():
-    plan = st.session_state.get("departure_result")
+def show_reminders(plan_key, title, event, alerts):
+    started_key = f'{plan_key}_alerts_started'
+    last_key = f'{plan_key}_last_alert'
+    plan = st.session_state.get(plan_key)
     if not plan:
         return
 
@@ -65,29 +78,29 @@ def show_departure_reminders():
     minutes, seconds = divmod(remaining, 60)
 
     with st.container(border=True):
-        st.subheader("오늘의 출근" if departure.date() == now.date() else "출근 계획")
+        st.subheader(title)
         st.markdown(label)
         st.caption(details)
         if now < departure:
-            st.metric("출발까지", f"{minutes:02d}:{seconds:02d}")
+            st.metric(f"{event}까지", f"{minutes:02d}:{seconds:02d}")
         else:
-            st.write("출발 시각이 되었어요.")
+            st.write(f"{event} 시각이 되었어요.")
 
-        started = st.session_state.get("departure_alerts_started")
+        started = st.session_state.get(started_key)
         if started is None:
-            if now < departure and st.button("알림 시작"):
-                st.session_state.departure_alerts_started = datetime.now(KST)
+            if now < departure and st.button(f"{event} 알림 시작", key=f"{plan_key}_start"):
+                st.session_state[started_key] = datetime.now(KST)
                 st.rerun(scope="app")
-        elif st.button("알림 끄기"):
-            st.session_state.pop("departure_alerts_started", None)
-            st.session_state.pop("departure_last_alert", None)
+        elif st.button(f"{event} 알림 끄기", key=f"{plan_key}_stop"):
+            st.session_state.pop(started_key, None)
+            st.session_state.pop(last_key, None)
             st.rerun(scope="app")
 
         lines = []
         latest_due = None
-        for offset, message in DEPARTURE_ALERTS:
+        for offset, message in alerts:
             scheduled = departure - timedelta(minutes=offset)
-            name = f"{offset}분 전" if offset else "출발 시각"
+            name = f"{offset}분 전" if offset else f"{event} 시각"
             if started is not None and started <= scheduled <= now:
                 latest_due = (scheduled, message)
             if started is not None and scheduled < started:
@@ -99,8 +112,8 @@ def show_departure_reminders():
             lines.append(f"{scheduled:%m/%d %H:%M} {name}{status}")
         st.caption("  |  ".join(lines))
 
-        if latest_due and st.session_state.get("departure_last_alert") != latest_due[0]:
-            st.session_state.departure_last_alert = latest_due[0]
+        if latest_due and st.session_state.get(last_key) != latest_due[0]:
+            st.session_state[last_key] = latest_due[0]
             if (now - latest_due[0]).total_seconds() < 60:
                 st.toast(latest_due[1], icon="🔔")
         if latest_due and (now - latest_due[0]).total_seconds() < 60:
@@ -122,9 +135,118 @@ with st.sidebar:
                 "buffer": buffer_minutes,
             }
             st.session_state.pop("departure_result", None)
-            st.session_state.pop("departure_alerts_started", None)
-            st.session_state.pop("departure_last_alert", None)
+            st.session_state.pop("departure_result_alerts_started", None)
+            st.session_state.pop("departure_result_last_alert", None)
             st.success("출퇴근 프로필을 저장했어요.")
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_seoul_forecast():
+    params = urlencode({
+        "latitude": 37.5665,
+        "longitude": 126.9780,
+        "timezone": "Asia/Seoul",
+        "hourly": "temperature_2m,precipitation_probability",
+        "forecast_days": 7,
+    })
+    with urlopen(f"https://api.open-meteo.com/v1/forecast?{params}", timeout=5) as response:
+        return json.load(response)["hourly"]
+
+
+def show_commute_weather(plan_key):
+    plan = st.session_state.get(plan_key)
+    if not plan:
+        st.caption("시각을 설정하면 서울 날씨 예보를 표시합니다.")
+        return
+
+    planned_at = plan[0]
+    hour = planned_at.replace(minute=0, second=0, microsecond=0)
+    # 강수 확률은 해당 정각 직전 한 시간의 값입니다.
+    rain_hour = hour + timedelta(hours=1)
+    try:
+        forecast = load_seoul_forecast()
+        hours = forecast["time"]
+        if hour.strftime("%Y-%m-%dT%H:%M") not in hours:
+            st.info("설정한 시각은 현재 서울 예보 범위에 없어요.")
+            return
+        i = hours.index(hour.strftime("%Y-%m-%dT%H:%M"))
+        rain_slot = rain_hour.strftime("%Y-%m-%dT%H:%M")
+        temperature = forecast["temperature_2m"][i]
+        rain = forecast["precipitation_probability"][hours.index(rain_slot)] if rain_slot in hours else None
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        st.info("날씨 예보를 가져오지 못했어요. 잠시 뒤 다시 확인해 주세요.")
+        return
+
+    st.markdown(f"**서울 날씨 예보 · {planned_at:%m/%d %H:%M} 일정 기준**")
+    temp_col, rain_col = st.columns(2)
+    temp_col.metric(f"기온 · {hour:%H:%M}", f"{temperature:g} °C" if temperature is not None else "—")
+    rain_col.metric(
+        f"강수 확률 · {hour:%H:%M}–{rain_hour:%H:%M}",
+        f"{rain:g}%" if rain is not None else "—",
+    )
+    st.caption("출처 · [Open-Meteo](https://open-meteo.com/)")
+
+
+commute_tab, work_tab = st.tabs(["출근", "퇴근"])
+with commute_tab:
+    with st.expander("출발 시각 계산", expanded=True):
+        defaults = st.session_state.get(
+            "departure_defaults", {"대중교통": 35, "자가용": 30, "buffer": 10}
+        )
+        with st.form("departure_calculator"):
+            transport = st.radio("이동수단", ["대중교통", "자가용"], horizontal=True)
+            arrival_date = st.date_input("목표 도착 날짜", value=datetime.now(KST).date())
+            arrival = st.time_input("목표 도착 시각", value=time(9, 0), step=60)
+            calculated = st.form_submit_button("출발 시각 계산")
+        if calculated:
+            travel = defaults[transport]
+            buffer = defaults["buffer"]
+            arrival_at = datetime.combine(arrival_date, arrival, tzinfo=KST)
+            departure = arrival_at - timedelta(minutes=travel + buffer)
+            prefix = "전날 " if departure.date() < arrival_at.date() else ""
+            st.session_state.departure_result = (
+                departure,
+                f"**{prefix}{departure:%H:%M} 출발**",
+                f"목표 {arrival:%H:%M} · {transport} 평소 {travel}분 · 여유 {buffer}분",
+            )
+            if st.session_state.get("departure_result_alerts_started") is not None:
+                st.session_state.departure_result_alerts_started = datetime.now(KST)
+            st.session_state.pop("departure_result_last_alert", None)
+    show_reminders("departure_result", "출근 계획", "출발", DEPARTURE_ALERTS)
+    show_commute_weather("departure_result")
+
+with work_tab:
+    with st.expander("퇴근·야근 알림 설정"):
+        with st.form("work_end_schedule"):
+            work_status = st.radio("근무 상태", ["정상 퇴근", "야근 확정", "야근 중 · 퇴근 시각 미정"])
+            work_date = st.date_input("퇴근 날짜", value=datetime.now(KST).date())
+            work_time = st.time_input("퇴근 시각", value=time(18, 0), step=60)
+            st.caption("퇴근 시각 미정을 선택하면 날짜와 시각은 사용하지 않습니다.")
+            save_work_end = st.form_submit_button("퇴근 일정 저장")
+
+        if save_work_end:
+            st.session_state.pop("work_end_result_last_alert", None)
+            if work_status == "야근 중 · 퇴근 시각 미정":
+                st.session_state.pop("work_end_result", None)
+                st.session_state.pop("work_end_result_alerts_started", None)
+                st.session_state.work_end_pending = True
+            else:
+                end_at = datetime.combine(work_date, work_time, tzinfo=KST)
+                st.session_state.work_end_result = (
+                    end_at,
+                    f"**{end_at:%m/%d %H:%M} 퇴근 예정**",
+                    f"{work_status} · 한국 시간",
+                )
+                st.session_state.work_end_pending = False
+                if st.session_state.get("work_end_result_alerts_started") is not None:
+                    st.session_state.work_end_result_alerts_started = datetime.now(KST)
+
+    if st.session_state.get("work_end_pending"):
+        st.info("야근 중 · 퇴근 시각 미정. 새 시각을 저장하면 퇴근 알림을 다시 시작할 수 있어요.")
+    show_reminders("work_end_result", "퇴근 계획", "퇴근", WORK_END_ALERTS)
+    show_commute_weather("work_end_result")
+
+st.divider()
+st.subheader("음성 비서")
 
 messages = st.session_state.setdefault("messages", [])
 if st.session_state.pop("show_latest_answer", False):
@@ -175,44 +297,6 @@ if view == "Speak":
         question = st.text_input("또는 텍스트로 질문하기")
         submitted = st.form_submit_button("보내기")
 
-    with st.expander("출발 시각 계산", expanded=True):
-        defaults = st.session_state.get(
-            "departure_defaults", {"대중교통": 35, "자가용": 30, "buffer": 10}
-        )
-        with st.form("departure_calculator"):
-            transport = st.radio("이동수단", ["대중교통", "자가용"], horizontal=True)
-            arrival_date = st.date_input("목표 도착 날짜", value=datetime.now(KST).date())
-            arrival = st.time_input("목표 도착 시각", value=time(9, 0), step=60)
-            calculated = st.form_submit_button("출발 시각 계산")
-        if calculated:
-            travel = defaults[transport]
-            buffer = defaults["buffer"]
-            arrival_at = datetime.combine(arrival_date, arrival, tzinfo=KST)
-            departure = arrival_at - timedelta(minutes=travel + buffer)
-            prefix = "전날 " if departure.date() < arrival_at.date() else ""
-            st.session_state.departure_result = (
-                departure,
-                f"**{prefix}{departure:%H:%M} 출발**",
-                f"목표 {arrival:%H:%M} · {transport} 평소 {travel}분 · 여유 {buffer}분",
-            )
-            if st.session_state.get("departure_alerts_started") is not None:
-                st.session_state.departure_alerts_started = datetime.now(KST)
-            st.session_state.pop("departure_last_alert", None)
-
-    with st.expander("지각 연락 초안"):
-        with st.form("late_message"):
-            recipient = st.text_input("받는 분 호칭", value="팀장님", max_chars=40)
-            delay = st.number_input("예상 지각 시간 (분)", 1, 720, 10)
-            drafted = st.form_submit_button("초안 만들기")
-        if drafted:
-            greeting = f"{recipient.strip()}, 안녕하세요." if recipient.strip() else "안녕하세요."
-            st.session_state.late_draft = (
-                f"{greeting} 김대리입니다. 오늘 출근이 약 {delay}분 늦어질 것 같아 "
-                "미리 연락드립니다. 도착 시간이 달라지면 다시 말씀드리겠습니다. 감사합니다."
-            )
-        if "late_draft" in st.session_state:
-            st.code(st.session_state.late_draft, language=None)
-
 elif messages:
     st.markdown("#### 최근 질문")
     st.write(messages[-2]["content"])
@@ -224,8 +308,6 @@ elif messages:
                 st.chat_message(message["role"]).markdown(message["content"])
 else:
     st.info("Speak에서 질문을 보내면 여기에 답변이 표시됩니다.")
-
-show_departure_reminders()
 
 if submitted:
     if not question.strip() and recording is None:
@@ -259,10 +341,10 @@ if submitted:
                 instructions=(
                     "당신은 직장인 김대리의 한국어 출근 준비 비서입니다. "
                     "사용자를 김대리님이라고 부르고 결론부터 간단하게 답하세요. "
-                    "일정과 준비물을 정리하고, 요청하면 정중한 지각 연락 초안을 작성하세요. "
+                    "일정과 준비물을 간단히 정리하세요. "
                     "메시지를 실제로 전송했다고 말하지 마세요. "
                     "출발 시각을 물으면 목표 도착 시각, 평소 소요시간, 여유 시간을 확인하고 "
-                    "Speak의 출발 시각 계산 기능을 안내하세요. 현재 교통 상태를 추측하지 마세요."
+                    "출근 탭의 출발 시각 계산 기능을 안내하세요. 현재 교통 상태를 추측하지 마세요."
                 ),
                 input=[*messages[-10:], {"role": "user", "content": question}],
             )
