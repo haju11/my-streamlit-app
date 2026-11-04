@@ -17,7 +17,7 @@ with st.sidebar:
     st.caption("공개된 교통 공지를 확인합니다. 경로별 실시간 소요시간과 열차 도착 시각은 지도나 교통정보 서비스에서 확인하세요.")
 
     st.subheader("출퇴근 프로필")
-    with st.form("commute_profile"):
+    with st.form("commute_profile_form"):
         region = st.text_input("지역", placeholder="예: 서울")
         home_station = st.text_input("집 근처 역 또는 동네", placeholder="예: 합정역")
         work_station = st.text_input("회사 근처 역 또는 동네", placeholder="예: 삼성역")
