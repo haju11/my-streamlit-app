@@ -1,5 +1,6 @@
 
 import os
+from html import escape
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
@@ -8,9 +9,43 @@ from openai import OpenAI, OpenAIError
 
 st.set_page_config(page_title="ThumbsUp AI", page_icon="👍🏻", layout="wide")
 
-st.title("Thumbs Up, Your Professional AI Voice Assistant")
-
-st.write("당신만의 AI Voice Assistant ThumbsUp입니다.\n무엇이든 음성으로 질문해주세요.")
+st.markdown("""
+<style>
+.stApp {
+    background: radial-gradient(ellipse at 50% 28%, #f0edff 0%, #f8f8fc 48%, #fff 100%);
+    color: #202036;
+}
+[data-testid="stMainBlockContainer"] { max-width: 62rem; padding-top: 3rem; }
+.thumbs-brand {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .8rem;
+    border-bottom: 1px solid #e5e3ef; padding: .6rem 0 1rem; color: #202036;
+}
+.thumbs-brand strong { font-size: 1.25rem; }
+.thumbs-brand span { color: #64627a; font-size: .9rem; }
+.thumbs-hero { text-align: center; padding: 1.5rem 0 .3rem; }
+.thumbs-label {
+    display: inline-block; padding: .35rem .95rem; border-radius: 99px;
+    background: #fae9f6; color: #773768; font-size: .88rem;
+}
+.thumbs-question {
+    max-width: 43rem; margin: .8rem auto 0; padding: clamp(1rem, 4vw, 2rem);
+    border-radius: 1.5rem; background: #fff; color: #222138;
+    box-shadow: 0 12px 42px #54449c12; font-weight: 650;
+    font-size: clamp(1.25rem, 3vw, 2rem); line-height: 1.5;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.thumbs-wave { display: block; width: 100%; height: auto; margin: .25rem auto 0; }
+.thumbs-hint { margin: .15rem 0 .8rem; color: #595773; }
+[data-testid="stMain"] [data-testid="stForm"],
+[data-testid="stMain"] [data-testid="stExpander"] details {
+    border: 1px solid #e4e0f4; border-radius: 1rem; background: #ffffffc9;
+}
+[data-testid="stMain"] [data-testid="stExpander"] summary {
+    background: #efedfa; color: #26223c;
+}
+</style>
+<div class="thumbs-brand"><strong>🎙️ ThumbsUp AI</strong><span>김대리의 음성 출퇴근 비서</span></div>
+""", unsafe_allow_html=True)
 
 with st.sidebar:
     mode = st.radio("답변 방식", ["교통 공지 검색", "일반 상담"])
@@ -60,21 +95,56 @@ def render_answer(response):
     return "\n\n".join(parts)
 
 
-st.subheader("원클릭 출퇴근 브리핑")
-outbound, inbound = st.columns(2)
-go_to_work = outbound.button("출근 브리핑")
-go_home = inbound.button("퇴근 브리핑")
-briefing = "출근" if go_to_work else "퇴근" if go_home else ""
-st.markdown("[지도에서 실시간 경로 확인](https://map.kakao.com/)")
+messages = st.session_state.setdefault("messages", [])
+latest_question = messages[-2]["content"] if messages else "김대리님, 무엇을 도와드릴까요?"
+hero_label = "최근 질문" if messages else "음성 비서 준비 완료"
+st.markdown(f"""
+<div class="thumbs-hero">
+    <span class="thumbs-label">{hero_label}</span>
+    <div class="thumbs-question">{escape(latest_question)}</div>
+    <svg class="thumbs-wave" viewBox="0 0 800 118" aria-hidden="true">
+        <defs>
+            <linearGradient id="thumbs-gradient">
+                <stop offset="0" stop-color="#9bb6ff" stop-opacity="0"/>
+                <stop offset=".42" stop-color="#9291ff"/>
+                <stop offset=".58" stop-color="#cb7ff2"/>
+                <stop offset="1" stop-color="#f398d4" stop-opacity="0"/>
+            </linearGradient>
+        </defs>
+        <path fill="url(#thumbs-gradient)" opacity=".47"
+              d="M0 59 C190 59 215 29 285 55 S360 73 400 59
+                 S490 25 550 49 S670 59 800 59 C640 59 600 88 530 64
+                 S447 46 400 59 S310 90 248 69 S120 59 0 59Z"/>
+        <path fill="none" stroke="url(#thumbs-gradient)" stroke-width="2"
+              d="M0 59 Q160 59 210 54 T310 59 T400 59 T495 54 T600 59 T800 59"/>
+        <circle cx="400" cy="59" r="44" fill="#a396fb" opacity=".18"/>
+        <circle cx="400" cy="59" r="36" fill="#fff" stroke="#d5caff"/>
+        <rect x="394" y="44" width="12" height="21" rx="6" fill="#ce61c8"/>
+        <path d="M389 58 V60 A11 11 0 0 0 411 60 V58 M400 71 V78"
+              fill="none" stroke="#ce61c8" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    <p class="thumbs-hint">아래 녹음 버튼을 누르거나 텍스트로 질문해 주세요.</p>
+</div>
+""", unsafe_allow_html=True)
 
-st.session_state.setdefault("messages", [])
-for message in st.session_state.messages:
-    st.chat_message(message["role"]).markdown(message["content"])
+if messages:
+    with st.expander("✦ 자세한 답변", expanded=True):
+        st.markdown(messages[-1]["content"])
+    if len(messages) > 2:
+        with st.expander("◷ 이전 대화 기록"):
+            for message in messages[:-2]:
+                st.chat_message(message["role"]).markdown(message["content"])
 
 with st.form("question", clear_on_submit=True):
-    question = st.text_input("김대리님, 무엇을 도와드릴까요?")
-    recording = st.audio_input("또는 음성으로 질문하기")
+    recording = st.audio_input("음성으로 질문하기")
+    question = st.text_input("또는 텍스트로 질문하기")
     submitted = st.form_submit_button("보내기")
+
+outbound, inbound = st.columns(2)
+go_to_work = outbound.button("출근 브리핑", use_container_width=True)
+go_home = inbound.button("퇴근 브리핑", use_container_width=True)
+briefing = "출근" if go_to_work else "퇴근" if go_home else ""
+st.markdown("[지도에서 실시간 경로 확인](https://map.kakao.com/)")
 
 if submitted or briefing:
     prompt = None
@@ -123,7 +193,6 @@ if submitted or briefing:
         st.warning("녹음에서 질문을 인식하지 못했습니다.")
         st.stop()
 
-    st.chat_message("user").write(question)
     with st.spinner("출퇴근 정보를 확인하고 있습니다..."):
         now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M KST")
         search = bool(briefing) or mode == "교통 공지 검색"
@@ -162,8 +231,8 @@ if submitted or briefing:
             st.error("답변을 받지 못했습니다. API 키, 모델 접근 권한 또는 사용 한도를 확인해 주세요.")
             st.stop()
 
-    st.chat_message("assistant").markdown(answer)
-    st.session_state.messages.extend([
+    messages.extend([
         {"role": "user", "content": question},
         {"role": "assistant", "content": answer},
     ])
+    st.rerun()
