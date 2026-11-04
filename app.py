@@ -79,7 +79,7 @@ def show_reminders(plan_key, title, event, alerts):
 
     with st.container(border=True):
         st.subheader(title)
-        st.markdown(label)
+        st.markdown(f"## {label.strip('*')}")
         st.caption(details)
         if now < departure:
             st.metric(f"{event}까지", f"{minutes:02d}:{seconds:02d}")
@@ -102,7 +102,8 @@ def show_reminders(plan_key, title, event, alerts):
             scheduled = departure - timedelta(minutes=offset)
             name = f"{offset}분 전" if offset else f"{event} 시각"
             if started is not None and started <= scheduled <= now:
-                latest_due = (scheduled, message)
+                custom = st.session_state.get(f"{plan_key}_spoken_{offset}")
+                latest_due = (scheduled, custom[0] if custom else message, custom)
             if started is not None and scheduled < started:
                 status = " · 건너뜀"
             elif scheduled <= now:
@@ -118,8 +119,11 @@ def show_reminders(plan_key, title, event, alerts):
                 st.toast(latest_due[1], icon="🔔")
         if latest_due and (now - latest_due[0]).total_seconds() < 60:
             st.warning(latest_due[1])
-            voice = st.session_state.get(f"{plan_key}_voice")
-            if latest_due[0] == departure and voice:
+            custom = latest_due[2]
+            voice = (custom[1], "audio/mpeg") if custom else None
+            if voice is None and latest_due[0] == departure:
+                voice = st.session_state.get(f"{plan_key}_voice")
+            if voice:
                 audio_bytes, audio_format = voice
                 st.audio(audio_bytes, format=audio_format, autoplay=True)
 
@@ -220,6 +224,62 @@ def show_voice_settings(plan_key):
             st.audio(audio_bytes, format=audio_format)
 
 
+def show_spoken_alert_settings(plan_key, event, alerts):
+    with st.expander("🔊 시점별 텍스트 음성 알림"):
+        st.caption("문구를 입력하거나 UTF-8 TXT 파일을 올리세요. 저장한 음성은 알림 시각에 재생돼요.")
+        offsets = [offset for offset, _ in alerts]
+        offset = st.selectbox(
+            "알림 시점", offsets, key=f"{plan_key}_spoken_offset",
+            format_func=lambda value: f"{value}분 전" if value else f"{event} 정각",
+        )
+        slot = f"{plan_key}_spoken_{offset}"
+        saved = st.session_state.get(slot)
+        with st.form(f"{slot}_form", clear_on_submit=True):
+            text = st.text_area("읽을 문구", max_chars=300)
+            uploaded = st.file_uploader("또는 TXT 파일 올리기", type=["txt"])
+            generate = st.form_submit_button("음성 만들고 저장")
+        if generate:
+            try:
+                if uploaded is not None and not text.strip():
+                    if uploaded.size > 4096:
+                        raise ValueError
+                    text = uploaded.getvalue().decode("utf-8-sig")
+                text = text.strip()
+                if not 1 <= len(text) <= 300:
+                    st.warning("1~300자의 문구를 입력하거나 올려 주세요.")
+                elif text == (saved[0] if saved else None):
+                    st.info("같은 문구의 음성이 이미 저장돼 있어요.")
+                elif not os.getenv("OPENAI_API_KEY"):
+                    st.warning("음성을 만들려면 OPENAI_API_KEY가 필요해요.")
+                else:
+                    with st.spinner("알림 음성을 만들고 있어요..."):
+                        client = OpenAI(timeout=30)
+                        speech = client.audio.speech.create(
+                            model="tts-1", voice="nova", input=text, response_format="mp3",
+                        )
+                        saved = (text, speech.content)
+                        st.session_state[slot] = saved
+                    st.success("이 시점의 음성 알림을 저장했어요.")
+            except ValueError:
+                st.warning("4KB 이하의 UTF-8 TXT 파일을 올려 주세요.")
+            except OpenAIError:
+                st.error("음성을 만들지 못했어요. API 키와 사용 한도를 확인해 주세요.")
+        if saved:
+            if st.button("이 시점 음성 지우기", key=f"{slot}_delete"):
+                st.session_state.pop(slot, None)
+            else:
+                st.caption("저장한 문구 · 미리 듣기")
+                st.text(saved[0])
+                st.audio(saved[1], format="audio/mpeg")
+        configured = [
+            f"{value}분 전" if value else "정각"
+            for value in offsets
+            if f"{plan_key}_spoken_{value}" in st.session_state
+        ]
+        if configured:
+            st.caption("음성을 지정한 시점 · " + ", ".join(configured))
+
+
 commute_tab, work_tab = st.tabs(["출근", "퇴근"])
 with work_tab:
     with st.expander("퇴근·야근 알림 설정"):
@@ -251,6 +311,7 @@ with work_tab:
         st.info("야근 중 · 퇴근 시각 미정. 새 시각을 저장하면 퇴근 알림을 다시 시작할 수 있어요.")
     show_reminders("work_end_result", "퇴근 계획", "퇴근", WORK_END_ALERTS)
     show_commute_weather("work_end_result")
+    show_spoken_alert_settings("work_end_result", "퇴근", WORK_END_ALERTS)
     show_voice_settings("work_end_result")
 
     with st.container(border=True):
@@ -286,6 +347,7 @@ with work_tab:
 
 
 with commute_tab:
+    departure_card = st.container()
     with st.expander("출발 시각 계산", expanded=True):
         defaults = st.session_state.get(
             "departure_defaults", {"대중교통": 35, "자가용": 30, "buffer": 10}
@@ -309,8 +371,10 @@ with commute_tab:
             if st.session_state.get("departure_result_alerts_started") is not None:
                 st.session_state.departure_result_alerts_started = datetime.now(KST)
             st.session_state.pop("departure_result_last_alert", None)
-    show_reminders("departure_result", "출근 계획", "출발", DEPARTURE_ALERTS)
+    with departure_card:
+        show_reminders("departure_result", "출근 계획", "출발", DEPARTURE_ALERTS)
     show_commute_weather("departure_result")
+    show_spoken_alert_settings("departure_result", "출발", DEPARTURE_ALERTS)
     show_voice_settings("departure_result")
 
     handoff = st.session_state.get("next_work_handoff")
