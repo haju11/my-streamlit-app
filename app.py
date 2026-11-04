@@ -2,7 +2,10 @@
 import os
 from html import escape
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from urllib.error import URLError
+from urllib.parse import quote, urlsplit
+from urllib.request import urlopen
+from xml.etree import ElementTree
 
 import streamlit as st
 from openai import OpenAI, OpenAIError
@@ -12,26 +15,24 @@ st.set_page_config(page_title="ThumbsUp AI", page_icon="👍🏻", layout="wide"
 st.markdown("""
 <style>
 .stApp {
-    background: radial-gradient(ellipse at 50% 28%, #f0edff 0%, #f8f8fc 48%, #fff 100%);
-    color: #202036;
+    background: linear-gradient(180deg, #f1f0ef 0%, #faf9f8 48%, #fff 85%);
+    color: #252525;
 }
-[data-testid="stMainBlockContainer"] { max-width: 62rem; padding-top: 3rem; }
+[data-testid="stMainBlockContainer"] { max-width: 58rem; padding-top: 3rem; }
 .thumbs-brand {
-    display: flex; flex-wrap: wrap; align-items: center; gap: .8rem;
-    border-bottom: 1px solid #e5e3ef; padding: .6rem 0 1rem; color: #202036;
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: .8rem;
+    border-bottom: 1px solid #e1dfdf; padding: .5rem 0 1rem; color: #262626;
 }
-.thumbs-brand strong { font-size: 1.25rem; }
-.thumbs-brand span { color: #64627a; font-size: .9rem; }
-.thumbs-hero { text-align: center; padding: 1.5rem 0 .3rem; }
-.thumbs-label {
-    display: inline-block; padding: .35rem .95rem; border-radius: 99px;
-    background: #fae9f6; color: #773768; font-size: .88rem;
-}
+.thumbs-brand strong { font-size: 1.15rem; letter-spacing: -.02em; }
+.thumbs-brand span { color: #646262; font-size: .85rem; }
+.thumbs-hero { text-align: center; padding: 1rem 0 0; }
+.thumbs-label { color: #615e62; font-size: .86rem; letter-spacing: .04em; }
 .thumbs-question {
-    max-width: 43rem; margin: .8rem auto 0; padding: clamp(1rem, 4vw, 2rem);
-    border-radius: 1.5rem; background: #fff; color: #222138;
-    box-shadow: 0 12px 42px #54449c12; font-weight: 650;
-    font-size: clamp(1.25rem, 3vw, 2rem); line-height: 1.5;
+    box-sizing: border-box; max-width: 38rem; min-height: 14rem;
+    margin: .9rem auto 1.3rem; padding: clamp(1.2rem, 5vw, 3.5rem);
+    display: grid; place-items: center; background: #fff; color: #252525;
+    box-shadow: 0 10px 26px #25252512; font-weight: 550;
+    font-size: clamp(1.25rem, 3vw, 1.9rem); line-height: 1.55;
     white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .thumbs-wave { display: block; width: 100%; height: auto; margin: .25rem auto 0; }
@@ -41,15 +42,15 @@ st.markdown("""
     border: 1px solid #e4e0f4; border-radius: 1rem; background: #ffffffc9;
 }
 [data-testid="stMain"] [data-testid="stExpander"] summary {
-    background: #efedfa; color: #26223c;
+    background: #f2f1f1; color: #252525;
 }
 </style>
-<div class="thumbs-brand"><strong>🎙️ ThumbsUp AI</strong><span>김대리의 음성 출퇴근 비서</span></div>
+<div class="thumbs-brand"><strong>ThumbsUp AI</strong><span>김대리의 음성 출퇴근 비서</span></div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
     mode = st.radio("답변 방식", ["교통 공지 검색", "일반 상담"])
-    st.caption("공개된 교통 공지를 확인합니다. 경로별 실시간 소요시간과 열차 도착 시각은 지도나 교통정보 서비스에서 확인하세요.")
+    st.caption("공개된 교통 공지를 확인합니다. 역별 실시간 열차 도착 정보는 Speak 화면에서 조회할 수 있습니다.")
 
     st.subheader("출퇴근 프로필")
     with st.form("commute_profile_form"):
@@ -96,55 +97,118 @@ def render_answer(response):
 
 
 messages = st.session_state.setdefault("messages", [])
-latest_question = messages[-2]["content"] if messages else "김대리님, 무엇을 도와드릴까요?"
-hero_label = "최근 질문" if messages else "음성 비서 준비 완료"
-st.markdown(f"""
-<div class="thumbs-hero">
-    <span class="thumbs-label">{hero_label}</span>
-    <div class="thumbs-question">{escape(latest_question)}</div>
-    <svg class="thumbs-wave" viewBox="0 0 800 118" aria-hidden="true">
-        <defs>
-            <linearGradient id="thumbs-gradient">
-                <stop offset="0" stop-color="#9bb6ff" stop-opacity="0"/>
-                <stop offset=".42" stop-color="#9291ff"/>
-                <stop offset=".58" stop-color="#cb7ff2"/>
-                <stop offset="1" stop-color="#f398d4" stop-opacity="0"/>
-            </linearGradient>
-        </defs>
-        <path fill="url(#thumbs-gradient)" opacity=".47"
-              d="M0 59 C190 59 215 29 285 55 S360 73 400 59
-                 S490 25 550 49 S670 59 800 59 C640 59 600 88 530 64
-                 S447 46 400 59 S310 90 248 69 S120 59 0 59Z"/>
-        <path fill="none" stroke="url(#thumbs-gradient)" stroke-width="2"
-              d="M0 59 Q160 59 210 54 T310 59 T400 59 T495 54 T600 59 T800 59"/>
-        <circle cx="400" cy="59" r="44" fill="#a396fb" opacity=".18"/>
-        <circle cx="400" cy="59" r="36" fill="#fff" stroke="#d5caff"/>
-        <rect x="394" y="44" width="12" height="21" rx="6" fill="#ce61c8"/>
-        <path d="M389 58 V60 A11 11 0 0 0 411 60 V58 M400 71 V78"
-              fill="none" stroke="#ce61c8" stroke-width="3" stroke-linecap="round"/>
-    </svg>
-    <p class="thumbs-hint">아래 녹음 버튼을 누르거나 텍스트로 질문해 주세요.</p>
-</div>
-""", unsafe_allow_html=True)
+if st.session_state.pop("show_latest_answer", False):
+    st.session_state.voice_view = "Listen"
+view = st.radio(
+    "화면 선택",
+    ["Speak", "Listen"],
+    key="voice_view",
+    horizontal=True,
+    label_visibility="collapsed",
+)
 
-if messages:
+submitted = False
+briefing = ""
+if view == "Speak":
+    latest_question = messages[-2]["content"] if messages else "김대리님, 무엇을 도와드릴까요?"
+    hero_label = "최근 질문" if messages else "음성 비서 준비 완료"
+    st.markdown(f"""
+    <div class="thumbs-hero">
+        <span class="thumbs-label">{hero_label}</span>
+        <div class="thumbs-question">{escape(latest_question)}</div>
+        <svg class="thumbs-wave" viewBox="0 0 800 118" aria-hidden="true">
+            <defs>
+                <linearGradient id="thumbs-gradient">
+                    <stop offset="0" stop-color="#9bb6ff" stop-opacity="0"/>
+                    <stop offset=".42" stop-color="#9291ff"/>
+                    <stop offset=".58" stop-color="#cb7ff2"/>
+                    <stop offset="1" stop-color="#f398d4" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+            <path fill="url(#thumbs-gradient)" opacity=".47"
+                  d="M0 59 C190 59 215 29 285 55 S360 73 400 59
+                     S490 25 550 49 S670 59 800 59 C640 59 600 88 530 64
+                     S447 46 400 59 S310 90 248 69 S120 59 0 59Z"/>
+            <path fill="none" stroke="url(#thumbs-gradient)" stroke-width="2"
+                  d="M0 59 Q160 59 210 54 T310 59 T400 59 T495 54 T600 59 T800 59"/>
+            <circle cx="400" cy="59" r="44" fill="#a396fb" opacity=".18"/>
+            <circle cx="400" cy="59" r="36" fill="#fff" stroke="#d5caff"/>
+            <rect x="394" y="44" width="12" height="21" rx="6" fill="#ce61c8"/>
+            <path d="M389 58 V60 A11 11 0 0 0 411 60 V58 M400 71 V78"
+                  fill="none" stroke="#ce61c8" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <p class="thumbs-hint">아래 녹음 버튼을 누르거나 텍스트로 질문해 주세요.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("question", clear_on_submit=True):
+        recording = st.audio_input("음성으로 질문하기")
+        question = st.text_input("또는 텍스트로 질문하기")
+        submitted = st.form_submit_button("보내기")
+
+    outbound, inbound = st.columns(2)
+    go_to_work = outbound.button("출근 브리핑", use_container_width=True)
+    go_home = inbound.button("퇴근 브리핑", use_container_width=True)
+    briefing = "출근" if go_to_work else "퇴근" if go_home else ""
+    with st.expander("🚇 실시간 지하철 도착", expanded=True):
+        profile = st.session_state.get("commute_profile", {})
+        direction = st.radio("탑승 방향", ["출근", "퇴근"], horizontal=True)
+        default_station = profile.get("home" if direction == "출근" else "work", "")
+        station_input = st.text_input(
+            "탑승역 직접 지정 (선택)",
+            placeholder=default_station or "예: 충무로역",
+        )
+        st.caption("직접 지정하지 않으면 저장된 출발역을 조회합니다. 도착 조회에는 OpenAI를 호출하지 않습니다.")
+        if st.button("다음 열차 조회"):
+            station = (station_input.strip() or default_station).removesuffix("역").strip()
+            subway_key = os.getenv("SEOUL_SUBWAY_API_KEY", "").strip()
+            if not subway_key:
+                st.warning("Streamlit Secrets에 SEOUL_SUBWAY_API_KEY를 등록해 주세요.")
+            elif not station:
+                st.warning("탑승역을 직접 입력하거나 출퇴근 프로필을 저장해 주세요.")
+            else:
+                station = "".join(station.split())
+                url = (
+                    f"https://swopenapi.seoul.go.kr/api/subway/{quote(subway_key, safe='')}"
+                    f"/xml/realtimeStationArrival/0/20/{quote(station, safe='')}"
+                )
+                try:
+                    with st.spinner("서울시 열차 도착 정보를 조회하고 있습니다..."):
+                        with urlopen(url, timeout=10) as response:
+                            arrivals = ElementTree.fromstring(response.read())
+                    rows = arrivals.findall("row")
+                    if arrivals.findtext("RESULT/code") not in (None, "INFO-000"):
+                        st.warning("서울시 API에서 조회를 처리하지 못했습니다. 인증키 종류와 호출 한도를 확인해 주세요.")
+                    elif not rows:
+                        st.info("도착 정보가 없습니다. 역 이름을 확인하거나 잠시 후 다시 조회해 주세요.")
+                    else:
+                        st.dataframe(
+                            [
+                                {
+                                    "역": row.findtext("statnNm") or station,
+                                    "행선지·방면": row.findtext("trainLineNm") or "—",
+                                    "도착 안내": row.findtext("arvlMsg2") or "—",
+                                    "정보 생성 시각 (KST)": row.findtext("recptnDt") or "—",
+                                }
+                                for row in rows
+                            ],
+                            hide_index=True,
+                        )
+                        st.caption("출처 · 서울 열린데이터광장. 탑승할 노선과 방면을 확인하세요.")
+                except (URLError, OSError, ElementTree.ParseError):
+                    st.error("서울시 지하철 도착 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.")
+    st.markdown("[지도에서 실시간 경로 확인](https://map.kakao.com/)")
+elif messages:
+    st.markdown("#### 최근 질문")
+    st.write(messages[-2]["content"])
     with st.expander("✦ 자세한 답변", expanded=True):
         st.markdown(messages[-1]["content"])
     if len(messages) > 2:
         with st.expander("◷ 이전 대화 기록"):
             for message in messages[:-2]:
                 st.chat_message(message["role"]).markdown(message["content"])
-
-with st.form("question", clear_on_submit=True):
-    recording = st.audio_input("음성으로 질문하기")
-    question = st.text_input("또는 텍스트로 질문하기")
-    submitted = st.form_submit_button("보내기")
-
-outbound, inbound = st.columns(2)
-go_to_work = outbound.button("출근 브리핑", use_container_width=True)
-go_home = inbound.button("퇴근 브리핑", use_container_width=True)
-briefing = "출근" if go_to_work else "퇴근" if go_home else ""
-st.markdown("[지도에서 실시간 경로 확인](https://map.kakao.com/)")
+else:
+    st.info("Speak에서 질문을 보내면 여기에 답변이 표시됩니다.")
 
 if submitted or briefing:
     prompt = None
@@ -235,4 +299,5 @@ if submitted or briefing:
         {"role": "user", "content": question},
         {"role": "assistant", "content": answer},
     ])
+    st.session_state.show_latest_answer = True
     st.rerun()
