@@ -197,6 +197,52 @@ if view == "Speak":
                         st.caption("출처 · 서울 열린데이터광장. 탑승할 노선과 방면을 확인하세요.")
                 except (URLError, OSError, ElementTree.ParseError):
                     st.error("서울시 지하철 도착 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.")
+    with st.expander("🚗 TOPIS 실시간 도로 소통"):
+        saved_road = st.session_state.get("commute_profile", {}).get("road", "")
+        if saved_road:
+            st.write(f"프로필에 저장한 도로: {saved_road}")
+        st.caption("TOPIS 도로별 링크 정보에서 확인한 구간 ID를 입력하세요. 같은 도로도 구간과 방향별로 ID가 다릅니다.")
+        st.markdown("[도로별 링크 정보](https://data.seoul.go.kr/dataList/OA-13309/A/1/datasetView.do)")
+        with st.form("topis_traffic_form"):
+            link_id = st.text_input("도로 구간 ID (LINK_ID)").strip()
+            lookup_road = st.form_submit_button("도로 소통 조회")
+        if lookup_road:
+            topis_key = os.getenv("SEOUL_TOPIS_API_KEY", "").strip()
+            if not topis_key:
+                st.warning("Streamlit Secrets에 SEOUL_TOPIS_API_KEY를 등록해 주세요.")
+            elif not (link_id.isascii() and link_id.isdecimal()):
+                st.warning("도로 구간 ID를 숫자로 입력해 주세요.")
+            else:
+                url = (
+                    f"http://openapi.seoul.go.kr:8088/{quote(topis_key, safe='')}"
+                    f"/xml/TrafficInfo/1/5/{link_id}"
+                )
+                try:
+                    with st.spinner("TOPIS 도로 소통 정보를 조회하고 있습니다..."):
+                        with urlopen(url, timeout=10) as response:
+                            traffic = ElementTree.fromstring(response.read())
+                    code = traffic.findtext("RESULT/CODE")
+                    rows = traffic.findall("row")
+                    if code == "INFO-200" or (code == "INFO-000" and not rows):
+                        st.info("이 구간의 통행 정보가 없습니다. 구간 ID를 확인해 주세요.")
+                    elif code != "INFO-000":
+                        st.warning("TOPIS가 조회를 처리하지 못했습니다. 일반 인증키와 구간 ID를 확인해 주세요.")
+                    else:
+                        st.dataframe(
+                            [
+                                {
+                                    "구간 ID": row.findtext("LINK_ID") or link_id,
+                                    "통행속도": row.findtext("PRCS_SPD") or "—",
+                                    "구간 통과시간": row.findtext("PRCS_TRV_TIME") or "—",
+                                }
+                                for row in rows
+                            ],
+                            hide_index=True,
+                        )
+                        checked_at = datetime.now(timezone(timedelta(hours=9)))
+                        st.caption(f"출처 · 서울시 TOPIS | 조회 시각 {checked_at:%H:%M:%S} KST")
+                except (OSError, ElementTree.ParseError):
+                    st.error("TOPIS 도로 소통 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.")
     st.markdown("[지도에서 실시간 경로 확인](https://map.kakao.com/)")
 elif messages:
     st.markdown("#### 최근 질문")
