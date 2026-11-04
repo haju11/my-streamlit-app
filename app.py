@@ -1,11 +1,7 @@
 
 import os
 from html import escape
-from datetime import datetime, timedelta, timezone
-from urllib.error import URLError
-from urllib.parse import quote, urlsplit
-from urllib.request import urlopen
-from xml.etree import ElementTree
+from datetime import datetime, time, timedelta, timezone
 
 import streamlit as st
 from openai import OpenAI, OpenAIError
@@ -45,56 +41,24 @@ st.markdown("""
     background: #f2f1f1; color: #252525;
 }
 </style>
-<div class="thumbs-brand"><strong>ThumbsUp AI</strong><span>김대리의 음성 출퇴근 비서</span></div>
+<div class="thumbs-brand"><strong>ThumbsUp AI</strong><span>김대리의 음성 출근 준비 비서</span></div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    mode = st.radio("답변 방식", ["교통 공지 검색", "일반 상담"])
-    st.caption("공개된 교통 공지를 확인합니다. 역별 실시간 열차 도착 정보는 Speak 화면에서 조회할 수 있습니다.")
-
     st.subheader("출퇴근 프로필")
+    st.caption("평소 소요시간과 여유 시간을 입력하세요. 현재 세션에서 사용합니다.")
     with st.form("commute_profile_form"):
-        region = st.text_input("지역", placeholder="예: 서울")
-        home_station = st.text_input("집 근처 역 또는 동네", placeholder="예: 합정역")
-        work_station = st.text_input("회사 근처 역 또는 동네", placeholder="예: 삼성역")
-        subway = st.text_input("자주 타는 노선", placeholder="예: 2호선")
-        road = st.text_input("자주 지나는 도로", placeholder="예: 올림픽대로")
+        subway_minutes = st.number_input("대중교통 소요시간 (분)", 1, 720, 35)
+        car_minutes = st.number_input("자가용 소요시간 (분)", 1, 720, 30)
+        buffer_minutes = st.number_input("기본 여유 시간 (분)", 0, 180, 10)
         if st.form_submit_button("프로필 저장"):
-            st.session_state.commute_profile = {
-                "region": region.strip(),
-                "home": home_station.strip(),
-                "work": work_station.strip(),
-                "subway": subway.strip(),
-                "road": road.strip(),
+            st.session_state.departure_defaults = {
+                "대중교통": subway_minutes,
+                "자가용": car_minutes,
+                "buffer": buffer_minutes,
             }
-            st.success("이 세션에 프로필을 저장했습니다.")
-    st.caption("역이나 동네 이름만 입력하세요. 브리핑을 요청하면 저장한 정보가 검색에 사용됩니다.")
-
-
-def render_answer(response):
-    """검색 출처를 답변의 해당 위치에 클릭 가능한 링크로 붙입니다."""
-    parts = []
-    for item in response.output:
-        if item.type != "message":
-            continue
-        for content in item.content:
-            if content.type != "output_text":
-                continue
-            answer = content.text
-            citations = sorted(
-                (entry for entry in content.annotations if entry.type == "url_citation"),
-                key=lambda entry: entry.end_index,
-                reverse=True,
-            )
-            for number, citation in reversed(list(enumerate(reversed(citations), start=1))):
-                url = citation.url
-                if urlsplit(url).scheme in {"http", "https"}:
-                    url = url.replace("<", "%3C").replace(">", "%3E")
-                    end = citation.end_index
-                    answer = answer[:end] + f" [출처 {number}](<{url}>)" + answer[end:]
-            parts.append(answer)
-    return "\n\n".join(parts)
-
+            st.session_state.pop("departure_result", None)
+            st.success("출퇴근 프로필을 저장했어요.")
 
 messages = st.session_state.setdefault("messages", [])
 if st.session_state.pop("show_latest_answer", False):
@@ -108,7 +72,6 @@ view = st.radio(
 )
 
 submitted = False
-briefing = ""
 if view == "Speak":
     latest_question = messages[-2]["content"] if messages else "김대리님, 무엇을 도와드릴까요?"
     hero_label = "최근 질문" if messages else "음성 비서 준비 완료"
@@ -146,104 +109,43 @@ if view == "Speak":
         question = st.text_input("또는 텍스트로 질문하기")
         submitted = st.form_submit_button("보내기")
 
-    outbound, inbound = st.columns(2)
-    go_to_work = outbound.button("출근 브리핑", use_container_width=True)
-    go_home = inbound.button("퇴근 브리핑", use_container_width=True)
-    briefing = "출근" if go_to_work else "퇴근" if go_home else ""
-    with st.expander("🚇 실시간 지하철 도착", expanded=True):
-        profile = st.session_state.get("commute_profile", {})
-        direction = st.radio("탑승 방향", ["출근", "퇴근"], horizontal=True)
-        default_station = profile.get("home" if direction == "출근" else "work", "")
-        station_input = st.text_input(
-            "탑승역 직접 지정 (선택)",
-            placeholder=default_station or "예: 충무로역",
+    with st.expander("출발 시각 계산", expanded=True):
+        defaults = st.session_state.get(
+            "departure_defaults", {"대중교통": 35, "자가용": 30, "buffer": 10}
         )
-        st.caption("직접 지정하지 않으면 저장된 출발역을 조회합니다. 도착 조회에는 OpenAI를 호출하지 않습니다.")
-        if st.button("다음 열차 조회"):
-            station = (station_input.strip() or default_station).removesuffix("역").strip()
-            subway_key = os.getenv("SEOUL_SUBWAY_API_KEY", "").strip()
-            if not subway_key:
-                st.warning("Streamlit Secrets에 SEOUL_SUBWAY_API_KEY를 등록해 주세요.")
-            elif not station:
-                st.warning("탑승역을 직접 입력하거나 출퇴근 프로필을 저장해 주세요.")
-            else:
-                station = "".join(station.split())
-                url = (
-                    f"https://swopenapi.seoul.go.kr/api/subway/{quote(subway_key, safe='')}"
-                    f"/xml/realtimeStationArrival/0/20/{quote(station, safe='')}"
-                )
-                try:
-                    with st.spinner("서울시 열차 도착 정보를 조회하고 있습니다..."):
-                        with urlopen(url, timeout=10) as response:
-                            arrivals = ElementTree.fromstring(response.read())
-                    rows = arrivals.findall("row")
-                    if arrivals.findtext("RESULT/code") not in (None, "INFO-000"):
-                        st.warning("서울시 API에서 조회를 처리하지 못했습니다. 인증키 종류와 호출 한도를 확인해 주세요.")
-                    elif not rows:
-                        st.info("도착 정보가 없습니다. 역 이름을 확인하거나 잠시 후 다시 조회해 주세요.")
-                    else:
-                        st.dataframe(
-                            [
-                                {
-                                    "역": row.findtext("statnNm") or station,
-                                    "행선지·방면": row.findtext("trainLineNm") or "—",
-                                    "도착 안내": row.findtext("arvlMsg2") or "—",
-                                    "정보 생성 시각 (KST)": row.findtext("recptnDt") or "—",
-                                }
-                                for row in rows
-                            ],
-                            hide_index=True,
-                        )
-                        st.caption("출처 · 서울 열린데이터광장. 탑승할 노선과 방면을 확인하세요.")
-                except (URLError, OSError, ElementTree.ParseError):
-                    st.error("서울시 지하철 도착 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.")
-    with st.expander("🚗 TOPIS 실시간 도로 소통"):
-        saved_road = st.session_state.get("commute_profile", {}).get("road", "")
-        if saved_road:
-            st.write(f"프로필에 저장한 도로: {saved_road}")
-        st.caption("TOPIS 도로별 링크 정보에서 확인한 구간 ID를 입력하세요. 같은 도로도 구간과 방향별로 ID가 다릅니다.")
-        st.markdown("[도로별 링크 정보](https://data.seoul.go.kr/dataList/OA-13309/A/1/datasetView.do)")
-        with st.form("topis_traffic_form"):
-            link_id = st.text_input("도로 구간 ID (LINK_ID)").strip()
-            lookup_road = st.form_submit_button("도로 소통 조회")
-        if lookup_road:
-            topis_key = os.getenv("SEOUL_TOPIS_API_KEY", "").strip()
-            if not topis_key:
-                st.warning("Streamlit Secrets에 SEOUL_TOPIS_API_KEY를 등록해 주세요.")
-            elif not (link_id.isascii() and link_id.isdecimal()):
-                st.warning("도로 구간 ID를 숫자로 입력해 주세요.")
-            else:
-                url = (
-                    f"http://openapi.seoul.go.kr:8088/{quote(topis_key, safe='')}"
-                    f"/xml/TrafficInfo/1/5/{link_id}"
-                )
-                try:
-                    with st.spinner("TOPIS 도로 소통 정보를 조회하고 있습니다..."):
-                        with urlopen(url, timeout=10) as response:
-                            traffic = ElementTree.fromstring(response.read())
-                    code = traffic.findtext("RESULT/CODE")
-                    rows = traffic.findall("row")
-                    if code == "INFO-200" or (code == "INFO-000" and not rows):
-                        st.info("이 구간의 통행 정보가 없습니다. 구간 ID를 확인해 주세요.")
-                    elif code != "INFO-000":
-                        st.warning("TOPIS가 조회를 처리하지 못했습니다. 일반 인증키와 구간 ID를 확인해 주세요.")
-                    else:
-                        st.dataframe(
-                            [
-                                {
-                                    "구간 ID": row.findtext("LINK_ID") or link_id,
-                                    "통행속도": row.findtext("PRCS_SPD") or "—",
-                                    "구간 통과시간": row.findtext("PRCS_TRV_TIME") or "—",
-                                }
-                                for row in rows
-                            ],
-                            hide_index=True,
-                        )
-                        checked_at = datetime.now(timezone(timedelta(hours=9)))
-                        st.caption(f"출처 · 서울시 TOPIS | 조회 시각 {checked_at:%H:%M:%S} KST")
-                except (OSError, ElementTree.ParseError):
-                    st.error("TOPIS 도로 소통 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.")
-    st.markdown("[지도에서 실시간 경로 확인](https://map.kakao.com/)")
+        with st.form("departure_calculator"):
+            transport = st.radio("이동수단", ["대중교통", "자가용"], horizontal=True)
+            arrival = st.time_input("목표 도착 시각", value=time(9, 0), step=60)
+            calculated = st.form_submit_button("출발 시각 계산")
+        if calculated:
+            travel = defaults[transport]
+            buffer = defaults["buffer"]
+            arrival_at = datetime.combine(datetime.now(timezone(timedelta(hours=9))).date(), arrival)
+            departure = arrival_at - timedelta(minutes=travel + buffer)
+            prefix = "전날 " if departure.date() < arrival_at.date() else ""
+            st.session_state.departure_result = (
+                f"**{prefix}{departure:%H:%M} 출발**",
+                f"목표 {arrival:%H:%M} · {transport} 평소 {travel}분 · 여유 {buffer}분",
+            )
+        if "departure_result" in st.session_state:
+            departure_label, calculation = st.session_state.departure_result
+            st.success(departure_label)
+            st.caption(calculation)
+
+    with st.expander("지각 연락 초안"):
+        with st.form("late_message"):
+            recipient = st.text_input("받는 분 호칭", value="팀장님", max_chars=40)
+            delay = st.number_input("예상 지각 시간 (분)", 1, 720, 10)
+            drafted = st.form_submit_button("초안 만들기")
+        if drafted:
+            greeting = f"{recipient.strip()}, 안녕하세요." if recipient.strip() else "안녕하세요."
+            st.session_state.late_draft = (
+                f"{greeting} 김대리입니다. 오늘 출근이 약 {delay}분 늦어질 것 같아 "
+                "미리 연락드립니다. 도착 시간이 달라지면 다시 말씀드리겠습니다. 감사합니다."
+            )
+        if "late_draft" in st.session_state:
+            st.code(st.session_state.late_draft, language=None)
+
 elif messages:
     st.markdown("#### 최근 질문")
     st.write(messages[-2]["content"])
@@ -256,29 +158,7 @@ elif messages:
 else:
     st.info("Speak에서 질문을 보내면 여기에 답변이 표시됩니다.")
 
-if submitted or briefing:
-    prompt = None
-    if briefing:
-        profile = st.session_state.get("commute_profile", {})
-        if not all(profile.get(field) for field in ("region", "home", "work")):
-            st.warning("사이드바에 지역과 집·회사 근처 역 또는 동네를 입력하고 프로필을 저장해 주세요.")
-            st.stop()
-        origin, destination = profile["home"], profile["work"]
-        if briefing == "퇴근":
-            origin, destination = destination, origin
-        question = f"{briefing} 브리핑"
-        prompt = (
-            f"김대리의 오늘 {briefing} 브리핑을 작성해 주세요.\n"
-            f"지역: {profile['region']}\n출발: {origin}\n도착: {destination}\n"
-            f"자주 타는 노선: {profile['subway'] or '미입력'}\n"
-            f"자주 지나는 도로: {profile['road'] or '미입력'}\n"
-            "프로필을 검색 조건으로 사용해 출발지에서 도착지 방향에 영향을 주는 "
-            "오늘의 공개 공지를 확인하세요. 자가용과 지하철을 나눠 작성하세요. "
-            "관련 공지마다 영향 구간·방향, 적용 시간, 출처를 표시하세요. "
-            "공지 적용 시간이나 방향을 확인할 수 없으면 그 사실을 표시하세요. "
-            "확인된 공지가 없으면 '관련 공지를 찾지 못했습니다'라고 표시하고 "
-            "마지막에 출발 전에 직접 확인할 항목을 알려주세요."
-        )
+if submitted:
     if not question.strip() and recording is None:
         st.warning("질문을 입력하거나 녹음해 주세요.")
         st.stop()
@@ -303,40 +183,21 @@ if submitted or briefing:
         st.warning("녹음에서 질문을 인식하지 못했습니다.")
         st.stop()
 
-    with st.spinner("출퇴근 정보를 확인하고 있습니다..."):
-        now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M KST")
-        search = bool(briefing) or mode == "교통 공지 검색"
-        options = {"tools": [{"type": "web_search"}]} if search else {}
-        if briefing:
-            options["tool_choice"] = "required"
-        guidance = (
-            "교통 공지나 사고, 통제, 지연을 묻는 경우 웹 검색으로 확인하세요. "
-            "공식 교통기관이나 운영기관을 우선하고, 공지의 발표 시각과 적용 시간, 구간을 구분하세요. "
-            "지역이나 노선이 불분명하면 한 가지 확인 질문을 하세요. "
-            "현재 적용되는 공지를 확인할 수 없다면 확인할 수 없었다고 답하세요."
-            if search else
-            "일반 상담 모드입니다. 현재 교통 상태는 확인하지 않았다고 안내하세요. "
-            "공개 공지가 필요한 경우 교통 공지 검색 모드를 안내하세요."
-        )
+    with st.spinner("답변을 준비하고 있습니다..."):
         try:
             result = client.responses.create(
                 model="gpt-4.1-mini",
                 instructions=(
-                    "당신은 30~40대 직장인 김대리의 한국어 출퇴근 비서입니다. "
+                    "당신은 직장인 김대리의 한국어 출근 준비 비서입니다. "
                     "사용자를 김대리님이라고 부르고 결론부터 간단하게 답하세요. "
-                    f"현재 한국 시각은 {now}입니다. {guidance} "
-                    "이전 대화의 교통 상태를 현재 상태로 인용하지 마세요. "
-                    "실시간 열차·버스 도착, 경로별 자동차 소요시간과 혼잡도를 추정하지 마세요. "
-                    "그 수치가 필요한 경우 사용자가 지도 앱이나 교통기관의 실시간 화면에서 "
-                    "어떤 역·방면이나 출발지·목적지를 확인하면 되는지 안내하세요."
+                    "일정과 준비물을 정리하고, 요청하면 정중한 지각 연락 초안을 작성하세요. "
+                    "메시지를 실제로 전송했다고 말하지 마세요. "
+                    "출발 시각을 물으면 목표 도착 시각, 평소 소요시간, 여유 시간을 확인하고 "
+                    "Speak의 출발 시각 계산 기능을 안내하세요. 현재 교통 상태를 추측하지 마세요."
                 ),
-                input=[
-                    *(st.session_state.messages[-10:] if not briefing else []),
-                    {"role": "user", "content": prompt or question},
-                ],
-                **options,
+                input=[*messages[-10:], {"role": "user", "content": question}],
             )
-            answer = render_answer(result) or "답변을 받지 못했습니다. 다시 질문해 주세요."
+            answer = result.output_text or "답변을 받지 못했습니다. 다시 질문해 주세요."
         except OpenAIError:
             st.error("답변을 받지 못했습니다. API 키, 모델 접근 권한 또는 사용 한도를 확인해 주세요.")
             st.stop()
