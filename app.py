@@ -44,6 +44,70 @@ st.markdown("""
 <div class="thumbs-brand"><strong>ThumbsUp AI</strong><span>김대리의 음성 출근 준비 비서</span></div>
 """, unsafe_allow_html=True)
 
+KST = timezone(timedelta(hours=9))
+DEPARTURE_ALERTS = (
+    (15, "사원증, 노트북, 회의 자료를 확인하세요."),
+    (10, "출발 준비를 마무리하세요."),
+    (5, "곧 출발할 시간이에요."),
+    (0, "김대리님, 지금 출발할 시간이에요."),
+)
+
+
+@st.fragment(run_every="1s")
+def show_departure_reminders():
+    plan = st.session_state.get("departure_result")
+    if not plan:
+        return
+
+    departure, label, details = plan
+    now = datetime.now(KST)
+    remaining = max(0, int((departure - now).total_seconds() + 0.999))
+    minutes, seconds = divmod(remaining, 60)
+
+    with st.container(border=True):
+        st.subheader("오늘의 출근" if departure.date() == now.date() else "출근 계획")
+        st.markdown(label)
+        st.caption(details)
+        if now < departure:
+            st.metric("출발까지", f"{minutes:02d}:{seconds:02d}")
+        else:
+            st.write("출발 시각이 되었어요.")
+
+        started = st.session_state.get("departure_alerts_started")
+        if started is None:
+            if now < departure and st.button("알림 시작"):
+                st.session_state.departure_alerts_started = datetime.now(KST)
+                st.rerun(scope="app")
+        elif st.button("알림 끄기"):
+            st.session_state.pop("departure_alerts_started", None)
+            st.session_state.pop("departure_last_alert", None)
+            st.rerun(scope="app")
+
+        lines = []
+        latest_due = None
+        for offset, message in DEPARTURE_ALERTS:
+            scheduled = departure - timedelta(minutes=offset)
+            name = f"{offset}분 전" if offset else "출발 시각"
+            if started is not None and started <= scheduled <= now:
+                latest_due = (scheduled, message)
+            if started is not None and scheduled < started:
+                status = " · 건너뜀"
+            elif scheduled <= now:
+                status = " · 지남"
+            else:
+                status = ""
+            lines.append(f"{scheduled:%m/%d %H:%M} {name}{status}")
+        st.caption("  |  ".join(lines))
+
+        if latest_due and st.session_state.get("departure_last_alert") != latest_due[0]:
+            st.session_state.departure_last_alert = latest_due[0]
+            if (now - latest_due[0]).total_seconds() < 60:
+                st.toast(latest_due[1], icon="🔔")
+        if latest_due and (now - latest_due[0]).total_seconds() < 60:
+            st.warning(latest_due[1])
+        st.caption("알림은 앱을 열어둔 동안 화면에 표시됩니다.")
+
+
 with st.sidebar:
     st.subheader("출퇴근 프로필")
     st.caption("평소 소요시간과 여유 시간을 입력하세요. 현재 세션에서 사용합니다.")
@@ -58,6 +122,8 @@ with st.sidebar:
                 "buffer": buffer_minutes,
             }
             st.session_state.pop("departure_result", None)
+            st.session_state.pop("departure_alerts_started", None)
+            st.session_state.pop("departure_last_alert", None)
             st.success("출퇴근 프로필을 저장했어요.")
 
 messages = st.session_state.setdefault("messages", [])
@@ -115,22 +181,23 @@ if view == "Speak":
         )
         with st.form("departure_calculator"):
             transport = st.radio("이동수단", ["대중교통", "자가용"], horizontal=True)
+            arrival_date = st.date_input("목표 도착 날짜", value=datetime.now(KST).date())
             arrival = st.time_input("목표 도착 시각", value=time(9, 0), step=60)
             calculated = st.form_submit_button("출발 시각 계산")
         if calculated:
             travel = defaults[transport]
             buffer = defaults["buffer"]
-            arrival_at = datetime.combine(datetime.now(timezone(timedelta(hours=9))).date(), arrival)
+            arrival_at = datetime.combine(arrival_date, arrival, tzinfo=KST)
             departure = arrival_at - timedelta(minutes=travel + buffer)
             prefix = "전날 " if departure.date() < arrival_at.date() else ""
             st.session_state.departure_result = (
+                departure,
                 f"**{prefix}{departure:%H:%M} 출발**",
                 f"목표 {arrival:%H:%M} · {transport} 평소 {travel}분 · 여유 {buffer}분",
             )
-        if "departure_result" in st.session_state:
-            departure_label, calculation = st.session_state.departure_result
-            st.success(departure_label)
-            st.caption(calculation)
+            if st.session_state.get("departure_alerts_started") is not None:
+                st.session_state.departure_alerts_started = datetime.now(KST)
+            st.session_state.pop("departure_last_alert", None)
 
     with st.expander("지각 연락 초안"):
         with st.form("late_message"):
@@ -157,6 +224,8 @@ elif messages:
                 st.chat_message(message["role"]).markdown(message["content"])
 else:
     st.info("Speak에서 질문을 보내면 여기에 답변이 표시됩니다.")
+
+show_departure_reminders()
 
 if submitted:
     if not question.strip() and recording is None:
