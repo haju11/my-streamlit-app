@@ -227,57 +227,47 @@ def show_voice_settings(plan_key):
 def show_spoken_alert_settings(plan_key, event, alerts):
     with st.expander("🔊 시점별 텍스트 음성 알림"):
         st.caption("문구를 입력하거나 UTF-8 TXT 파일을 올리세요. 저장한 음성은 알림 시각에 재생돼요.")
-        offsets = [offset for offset, _ in alerts]
-        offset = st.selectbox(
-            "알림 시점", offsets, key=f"{plan_key}_spoken_offset",
-            format_func=lambda value: f"{value}분 전" if value else f"{event} 정각",
-        )
-        slot = f"{plan_key}_spoken_{offset}"
-        saved = st.session_state.get(slot)
-        with st.form(f"{slot}_form", clear_on_submit=True):
-            text = st.text_area("읽을 문구", max_chars=300)
-            uploaded = st.file_uploader("또는 TXT 파일 올리기", type=["txt"])
-            generate = st.form_submit_button("음성 만들고 저장")
-        if generate:
-            try:
-                if uploaded is not None and not text.strip():
-                    if uploaded.size > 4096:
-                        raise ValueError
-                    text = uploaded.getvalue().decode("utf-8-sig")
-                text = text.strip()
-                if not 1 <= len(text) <= 300:
-                    st.warning("1~300자의 문구를 입력하거나 올려 주세요.")
-                elif text == (saved[0] if saved else None):
-                    st.info("같은 문구의 음성이 이미 저장돼 있어요.")
-                elif not os.getenv("OPENAI_API_KEY"):
-                    st.warning("음성을 만들려면 OPENAI_API_KEY가 필요해요.")
+        for offset, _ in alerts:
+            st.markdown(f"**{offset}분 전**" if offset else f"**{event} 정각**")
+            slot = f"{plan_key}_spoken_{offset}"
+            saved = st.session_state.get(slot)
+            with st.form(f"{slot}_form", clear_on_submit=True):
+                text = st.text_area("읽을 문구", max_chars=300, key=f"{slot}_text")
+                uploaded = st.file_uploader("또는 TXT 파일 올리기", type=["txt"], key=f"{slot}_file")
+                generate = st.form_submit_button("음성 만들고 저장")
+            if generate:
+                try:
+                    if uploaded is not None and not text.strip():
+                        if uploaded.size > 4096:
+                            raise ValueError
+                        text = uploaded.getvalue().decode("utf-8-sig")
+                    text = text.strip()
+                    if not 1 <= len(text) <= 300:
+                        st.warning("1~300자의 문구를 입력하거나 올려 주세요.")
+                    elif text == (saved[0] if saved else None):
+                        st.info("같은 문구의 음성이 이미 저장돼 있어요.")
+                    elif not os.getenv("OPENAI_API_KEY"):
+                        st.warning("음성을 만들려면 OPENAI_API_KEY가 필요해요.")
+                    else:
+                        with st.spinner("알림 음성을 만들고 있어요..."):
+                            client = OpenAI(timeout=30)
+                            speech = client.audio.speech.create(
+                                model="tts-1", voice="nova", input=text, response_format="mp3",
+                            )
+                            saved = (text, speech.content)
+                            st.session_state[slot] = saved
+                        st.success("이 시점의 음성 알림을 저장했어요.")
+                except ValueError:
+                    st.warning("4KB 이하의 UTF-8 TXT 파일을 올려 주세요.")
+                except OpenAIError:
+                    st.error("음성을 만들지 못했어요. API 키와 사용 한도를 확인해 주세요.")
+            if saved:
+                if st.button("이 시점 음성 지우기", key=f"{slot}_delete"):
+                    st.session_state.pop(slot, None)
                 else:
-                    with st.spinner("알림 음성을 만들고 있어요..."):
-                        client = OpenAI(timeout=30)
-                        speech = client.audio.speech.create(
-                            model="tts-1", voice="nova", input=text, response_format="mp3",
-                        )
-                        saved = (text, speech.content)
-                        st.session_state[slot] = saved
-                    st.success("이 시점의 음성 알림을 저장했어요.")
-            except ValueError:
-                st.warning("4KB 이하의 UTF-8 TXT 파일을 올려 주세요.")
-            except OpenAIError:
-                st.error("음성을 만들지 못했어요. API 키와 사용 한도를 확인해 주세요.")
-        if saved:
-            if st.button("이 시점 음성 지우기", key=f"{slot}_delete"):
-                st.session_state.pop(slot, None)
-            else:
-                st.caption("저장한 문구 · 미리 듣기")
-                st.text(saved[0])
-                st.audio(saved[1], format="audio/mpeg")
-        configured = [
-            f"{value}분 전" if value else "정각"
-            for value in offsets
-            if f"{plan_key}_spoken_{value}" in st.session_state
-        ]
-        if configured:
-            st.caption("음성을 지정한 시점 · " + ", ".join(configured))
+                    st.caption("저장한 문구 · 미리 듣기")
+                    st.text(saved[0])
+                    st.audio(saved[1], format="audio/mpeg")
 
 
 commute_tab, work_tab = st.tabs(["출근", "퇴근"])
@@ -375,7 +365,6 @@ with commute_tab:
         show_reminders("departure_result", "출근 계획", "출발", DEPARTURE_ALERTS)
     show_commute_weather("departure_result")
     show_spoken_alert_settings("departure_result", "출발", DEPARTURE_ALERTS)
-    show_voice_settings("departure_result")
 
     handoff = st.session_state.get("next_work_handoff")
     if handoff:
