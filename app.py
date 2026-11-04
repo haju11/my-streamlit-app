@@ -162,37 +162,38 @@ def load_seoul_forecast():
 
 
 def show_commute_weather(plan_key):
-    plan = st.session_state.get(plan_key)
-    if not plan:
-        st.caption("시각을 설정하면 서울 날씨 예보를 표시합니다.")
-        return
-
-    planned_at = plan[0]
-    hour = planned_at.replace(minute=0, second=0, microsecond=0)
-    # 강수 확률은 해당 정각 직전 한 시간의 값입니다.
-    rain_hour = hour + timedelta(hours=1)
-    try:
-        forecast = load_seoul_forecast()
-        hours = forecast["time"]
-        if hour.strftime("%Y-%m-%dT%H:%M") not in hours:
-            st.info("설정한 시각은 현재 서울 예보 범위에 없어요.")
+    with st.container(border=True):
+        st.markdown("#### 🌦️ 날씨와 강수 확률")
+        plan = st.session_state.get(plan_key)
+        planned_at = plan[0] if plan else datetime.now(KST)
+        basis = "일정 기준" if plan else "현재 시간대 · 일정 설정 전"
+        hour = planned_at.replace(minute=0, second=0, microsecond=0)
+        # 강수 확률은 해당 정각 직전 한 시간의 값입니다.
+        rain_hour = hour + timedelta(hours=1)
+        try:
+            forecast = load_seoul_forecast()
+            hours = forecast["time"]
+            if hour.strftime("%Y-%m-%dT%H:%M") not in hours:
+                st.info("설정한 시각은 현재 서울 예보 범위에 없어요.")
+                return
+            i = hours.index(hour.strftime("%Y-%m-%dT%H:%M"))
+            rain_slot = rain_hour.strftime("%Y-%m-%dT%H:%M")
+            temperature = forecast["temperature_2m"][i]
+            rain = forecast["precipitation_probability"][hours.index(rain_slot)] if rain_slot in hours else None
+        except (OSError, ValueError, KeyError, TypeError, IndexError):
+            st.info("날씨 예보를 가져오지 못했어요. 잠시 뒤 다시 확인해 주세요.")
             return
-        i = hours.index(hour.strftime("%Y-%m-%dT%H:%M"))
-        rain_slot = rain_hour.strftime("%Y-%m-%dT%H:%M")
-        temperature = forecast["temperature_2m"][i]
-        rain = forecast["precipitation_probability"][hours.index(rain_slot)] if rain_slot in hours else None
-    except (OSError, ValueError, KeyError, TypeError, IndexError):
-        st.info("날씨 예보를 가져오지 못했어요. 잠시 뒤 다시 확인해 주세요.")
-        return
 
-    st.markdown(f"**서울 날씨 예보 · {planned_at:%m/%d %H:%M} 일정 기준**")
-    temp_col, rain_col = st.columns(2)
-    temp_col.metric(f"기온 · {hour:%H:%M}", f"{temperature:g} °C" if temperature is not None else "—")
-    rain_col.metric(
-        f"강수 확률 · {hour:%H:%M}–{rain_hour:%H:%M}",
-        f"{rain:g}%" if rain is not None else "—",
-    )
-    st.caption("출처 · [Open-Meteo](https://open-meteo.com/)")
+        st.caption(f"서울 · {planned_at:%m/%d %H:%M} · {basis}")
+        temp_col, rain_col = st.columns(2)
+        temp_col.metric(f"기온 · {hour:%H:%M}", f"{temperature:g} °C" if temperature is not None else "—")
+        rain_col.metric(
+            f"강수 확률 · {hour:%H:%M}–{rain_hour:%H:%M}",
+            f"{rain:g}%" if rain is not None else "—",
+        )
+        if rain is not None and rain > 40:
+            st.warning("☔ 강수 확률이 40%를 넘어요. 우산을 챙기세요!")
+        st.caption("출처 · [Open-Meteo](https://open-meteo.com/)")
 
 
 def show_voice_settings(plan_key):
@@ -224,12 +225,17 @@ def show_voice_settings(plan_key):
             st.audio(audio_bytes, format=audio_format)
 
 
-def show_spoken_alert_settings(plan_key, event, alerts):
+def show_spoken_alert_settings(plan_key, event, alerts, *, include_overtime=False):
     with st.expander("🔊 시점별 텍스트 음성 알림"):
         st.caption("문구를 입력하거나 UTF-8 TXT 파일을 올리세요. 저장한 음성은 알림 시각에 재생돼요.")
-        for offset, _ in alerts:
-            st.markdown(f"**{offset}분 전**" if offset else f"**{event} 정각**")
-            slot = f"{plan_key}_spoken_{offset}"
+        slots = [
+            (f"{plan_key}_spoken_{offset}", f"{offset}분 전" if offset else f"{event} 정각")
+            for offset, _ in alerts
+        ]
+        if include_overtime:
+            slots.append(("work_end_overtime_voice", "야근 확정 시 · 일정 저장 즉시"))
+        for slot, title in slots:
+            st.markdown(f"**{title}**")
             saved = st.session_state.get(slot)
             with st.form(f"{slot}_form", clear_on_submit=True):
                 text = st.text_area("읽을 문구", max_chars=300, key=f"{slot}_text")
@@ -301,7 +307,45 @@ with work_tab:
         st.info("야근 중 · 퇴근 시각 미정. 새 시각을 저장하면 퇴근 알림을 다시 시작할 수 있어요.")
     show_reminders("work_end_result", "퇴근 계획", "퇴근", WORK_END_ALERTS)
     show_commute_weather("work_end_result")
-    show_spoken_alert_settings("work_end_result", "퇴근", WORK_END_ALERTS)
+    show_spoken_alert_settings(
+        "work_end_result", "퇴근", WORK_END_ALERTS, include_overtime=True,
+    )
+    if save_work_end and work_status == "야근 확정":
+        st.markdown(
+            """
+            <style>
+            .overtime-blast {
+                position: fixed; inset: 0; z-index: 100000;
+                display: grid; place-items: center; pointer-events: none;
+                background: radial-gradient(circle, #ffbf69ee 0%, #b53c23dc 45%, #221122dd 100%);
+                color: white; text-align: center; font-size: clamp(2rem, 9vw, 6rem);
+                font-weight: 800; animation: overtime-fade 2.3s ease-out forwards;
+            }
+            .overtime-blast span { animation: overtime-pop .55s ease-out both; }
+            @keyframes overtime-pop {
+                from { transform: scale(.35); }
+                to { transform: scale(1); }
+            }
+            @keyframes overtime-fade {
+                0%, 55% { opacity: 1; }
+                100% { opacity: 0; visibility: hidden; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .overtime-blast { animation-timing-function: steps(1, end); }
+                .overtime-blast span { animation: none; }
+            }
+            </style>
+            <div class="overtime-blast" aria-hidden="true"><span>💣 💥<br>야근 확정!</span></div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.warning("야근이 확정됐어요. 새 퇴근 일정을 저장했습니다.")
+        overtime_voice = st.session_state.get("work_end_overtime_voice")
+        if overtime_voice:
+            text, audio = overtime_voice
+            st.text(text)
+            st.audio(audio, format="audio/mpeg", autoplay=True)
+
     show_voice_settings("work_end_result")
 
     with st.container(border=True):
