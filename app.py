@@ -1,67 +1,116 @@
 
-import os, base64, json, requests
+import os
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
+
 import streamlit as st
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
-# OpenAI 클라이언트 생성
-client = OpenAI()
+st.set_page_config(page_title="ThumbsUp AI", page_icon="👍🏻", layout="wide")
 
-# 페이지 설정
-st.set_page_config(page_title="음성 AI 서비스", page_icon="🤖", layout="wide")
-st.title("음성 인식 AI 서비스")
-st.write("음성으로 질문하시면 답변해 드립니다.")
+st.title("Thumbs Up, Your Professional AI Voice Assistant")
 
-# 역할 지정
-sys_role = """
-당신은 다양한 업무를 처리하는 AI 서비스입니다.
-개인 비서처럼 친절하게 응대합니다.
-"""
+st.write("당신만의 AI Voice Assistant ThumbsUp입니다.\n무엇이든 음성으로 질문해주세요.")
 
-# 상태 초기화
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+with st.sidebar:
+    mode = st.radio("답변 방식", ["교통 공지 검색", "일반 상담"])
+    st.caption("공개된 교통 공지를 확인합니다. 경로별 실시간 소요시간과 열차 도착 시각은 지도나 교통정보 서비스에서 확인하세요.")
 
-# 지시 영역
-with st.form("task_form"):
-    uploaded_file = st.file_uploader("텍스트 파일 업로드", type=["txt"])
-    audio_value = st.audio_input("무엇을 도와드릴까요?")
-    submit = st.form_submit_button("실행")
+def render_answer(response):
+    """검색 출처를 답변의 해당 위치에 클릭 가능한 링크로 붙입니다."""
+    parts = []
+    for item in response.output:
+        if item.type != "message":
+            continue
+        for content in item.content:
+            if content.type != "output_text":
+                continue
+            answer = content.text
+            citations = sorted(
+                (entry for entry in content.annotations if entry.type == "url_citation"),
+                key=lambda entry: entry.end_index,
+                reverse=True,
+            )
+            for number, citation in reversed(list(enumerate(reversed(citations), start=1))):
+                url = citation.url
+                if urlsplit(url).scheme in {"http", "https"}:
+                    url = url.replace("<", "%3C").replace(">", "%3E")
+                    end = citation.end_index
+                    answer = answer[:end] + f" [출처 {number}](<{url}>)" + answer[end:]
+            parts.append(answer)
+    return "\n\n".join(parts)
 
-# 버튼을 눌렀을 때만 실행
-if submit:
-    # 업로드 된 파일이 있으면 디코딩
-    text = ""
-    if uploaded_file is not None:
-        text = uploaded_file.read().decode("utf-8")
 
-    # 녹음이 없으면 녹음 요청
-    if audio_value is None:
-        st.warning("음성을 녹음해주세요.")
+st.session_state.setdefault("messages", [])
+for message in st.session_state.messages:
+    st.chat_message(message["role"]).markdown(message["content"])
+
+with st.form("question", clear_on_submit=True):
+    question = st.text_input("김대리님, 무엇을 도와드릴까요?")
+    recording = st.audio_input("또는 음성으로 질문하기")
+    submitted = st.form_submit_button("보내기")
+
+if submitted:
+    if not question.strip() and recording is None:
+        st.warning("질문을 입력하거나 녹음해 주세요.")
         st.stop()
 
-    # 시스템 메세지
-    system_content = sys_role
-    if text:
-        system_content += f"\n\n다음 내용을 참고하세요:\n{text}"
-    input_messages = [{"role": "system", "content": system_content}]
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        st.error("OPENAI_API_KEY를 설정해 주세요.")
+        st.stop()
+    client = OpenAI(api_key=api_key, timeout=60)
 
-    # STT: 음성 → 텍스트
-    transcript = client.audio.transcriptions.create(
-        model="whisper-1",
-        file=("audio.wav", audio_value, "audio/wav"))
+    try:
+        if not question.strip():
+            question = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=("question.wav", recording.getvalue(), "audio/wav"),
+            ).text
+    except OpenAIError:
+        st.error("음성 변환에 실패했습니다. API 설정을 확인하거나 텍스트로 질문해 주세요.")
+        st.stop()
 
-    # 사용자 메시지
-    input_messages.append({"role": "user", "content": transcript.text})
+    if not question.strip():
+        st.warning("녹음에서 질문을 인식하지 못했습니다.")
+        st.stop()
 
-    # LLM 호출 및 응답 듣기
-    with st.spinner("답변을 준비하고 있습니다..."):
-        # LLM 호출
-        response = client.responses.create(
-            model="gpt-4o-mini",
-            input=input_messages
+    st.chat_message("user").write(question)
+    with st.spinner("출퇴근 정보를 확인하고 있습니다..."):
+        now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M KST")
+        search = mode == "교통 공지 검색"
+        options = {"tools": [{"type": "web_search"}]} if search else {}
+        guidance = (
+            "교통 공지나 사고, 통제, 지연을 묻는 경우 웹 검색으로 확인하세요. "
+            "공식 교통기관이나 운영기관을 우선하고, 공지의 발표 시각과 적용 시간, 구간을 구분하세요. "
+            "지역이나 노선이 불분명하면 한 가지 확인 질문을 하세요. "
+            "현재 적용되는 공지를 확인할 수 없다면 확인할 수 없었다고 답하세요."
+            if search else
+            "일반 상담 모드입니다. 현재 교통 상태는 확인하지 않았다고 안내하세요. "
+            "공개 공지가 필요한 경우 교통 공지 검색 모드를 안내하세요."
         )
-        answer = response.output_text
+        try:
+            result = client.responses.create(
+                model="gpt-4.1-mini",
+                instructions=(
+                    "당신은 30~40대 직장인 김대리의 한국어 출퇴근 비서입니다. "
+                    "사용자를 김대리님이라고 부르고 결론부터 간단하게 답하세요. "
+                    f"현재 한국 시각은 {now}입니다. {guidance} "
+                    "이전 대화의 교통 상태를 현재 상태로 인용하지 마세요. "
+                    "실시간 열차·버스 도착, 경로별 자동차 소요시간과 혼잡도를 추정하지 마세요. "
+                    "그 수치가 필요한 경우 사용자가 지도 앱이나 교통기관의 실시간 화면에서 "
+                    "어떤 역·방면이나 출발지·목적지를 확인하면 되는지 안내하세요."
+                ),
+                input=[*st.session_state.messages[-10:], {"role": "user", "content": question}],
+                **options,
+            )
+            answer = render_answer(result) or "답변을 받지 못했습니다. 다시 질문해 주세요."
+        except OpenAIError:
+            st.error("답변을 받지 못했습니다. API 키, 모델 접근 권한 또는 사용 한도를 확인해 주세요.")
+            st.stop()
 
-        # 응답 출력
-        st.subheader("AI 답변")
-        st.write(answer)
+    st.chat_message("assistant").markdown(answer)
+    st.session_state.messages.extend([
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": answer},
+    ])
