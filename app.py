@@ -705,7 +705,10 @@ def handle_commute_request(question):
             f"Current Korean date and time: {now:%Y-%m-%d %H:%M}. "
             f"Pending clarification action: {pending or 'none'}."
         ),
-        input=question,
+        input=[
+            {"role": "system", "content": "Return the classification as a JSON object."},
+            {"role": "user", "content": question},
+        ],
         text={"format": {"type": "json_object"}},
     )
     try:
@@ -1073,6 +1076,9 @@ with main_column:  # 본문 열에 표시
                             429: "OpenAI API 크레딧, 사용 한도 또는 요청 빈도를 확인해 주세요.",
                         }.get(status, "잠시 뒤 다시 시도해 주세요.")
                         detail = f"HTTP {status}" if isinstance(status, int) else type(error).__name__
+                        code = getattr(error, "code", None)
+                        if isinstance(code, str) and re.fullmatch(r"[a-z0-9_]{1,80}", code):
+                            detail += f" · {code}"
                         st.error(f"{stage} 실패 ({detail}). {hint}")
                     except Exception as error:
                         st.error(f"{stage} 중 앱 오류가 발생했습니다 ({type(error).__name__}).")
