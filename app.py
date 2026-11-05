@@ -1039,10 +1039,12 @@ with main_column:  # 본문 열에 표시
                 if client is None:  # 인증정보가 없다면
                     st.error("OPENAI_API_KEY 설정이 필요합니다.")  # 인증 안내
                 else:  # 답변 생성 가능
+                    stage = "출퇴근 요청 분석"
                     try:  # GPT 및 TTS 호출 시도
                         with st.spinner("Thumbs Up이 답변을 준비하고 있습니다..."):  # 답변 생성 안내
                             answer, preview_audio = handle_commute_request(pending_question)
                             if answer is None:
+                                stage = "일반 답변 생성"
                                 answer = ask_gpt(pending_question, meeting_text)
                             speech_bytes = preview_audio
                             st.session_state.command_audio_preview = preview_audio is not None
@@ -1053,6 +1055,7 @@ with main_column:  # 본문 열에 표시
                                     speech_bytes = speech.content  # 음성 바이트 저장
                                 except Exception as error:  # 음성 변환만 실패했다면
                                     st.warning("텍스트 답변은 준비됐지만 음성 생성에 실패했습니다.")  # 텍스트 답변은 유지
+                            stage = "답변 저장"
                             st.session_state.last_question = pending_question  # 질문 갱신
                             st.session_state.last_answer = answer  # 답변 갱신
                             st.session_state.last_audio = speech_bytes  # 음성 결과 갱신
@@ -1060,8 +1063,19 @@ with main_column:  # 본문 열에 표시
                             st.session_state.mail_body = answer  # 이메일 초안 유지
                             st.session_state.recorder_count += 1  # 다음 녹음을 위한 위젯 초기화
                         st.rerun()  # 질문·답변 화면 갱신
-                    except Exception as error:  # 답변 생성 오류
-                        st.error("답변 생성에 실패했습니다. API 설정을 확인해 주세요.")  # 오류 안내
+                    except OpenAIError as error:
+                        status = getattr(error, "status_code", None)
+                        hint = {
+                            400: "모델과 요청 형식을 확인해 주세요.",
+                            401: "Streamlit Secrets의 OPENAI_API_KEY가 유효한지 확인해 주세요.",
+                            403: "API 프로젝트의 접근 권한을 확인해 주세요.",
+                            404: "API 프로젝트에서 요청한 모델에 접근할 수 있는지 확인해 주세요.",
+                            429: "OpenAI API 크레딧, 사용 한도 또는 요청 빈도를 확인해 주세요.",
+                        }.get(status, "잠시 뒤 다시 시도해 주세요.")
+                        detail = f"HTTP {status}" if isinstance(status, int) else type(error).__name__
+                        st.error(f"{stage} 실패 ({detail}). {hint}")
+                    except Exception as error:
+                        st.error(f"{stage} 중 앱 오류가 발생했습니다 ({type(error).__name__}).")
 
             with st.container(key="answer_card"):  # 시안의 답변 카드
                 st.markdown(f'<div class="card-title"><span class="icon-bubble">{ui_icon("bot")}</span><span>Thumbs Up의 답변</span></div>', unsafe_allow_html=True)  # 답변 영역 제목
