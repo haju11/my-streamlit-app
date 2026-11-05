@@ -878,6 +878,7 @@ if st.session_state.panel_open:  # 설정창이 열린 경우에만 내부 기�
                 st.session_state.last_answer = ""  # 답변 표시 초기화
                 st.session_state.last_audio = None  # 답변 음성 초기화
                 st.session_state.mail_body = ""
+                st.session_state.pop("processed_voice_digest", None)
                 st.session_state.risk_result = ""  # 분석 결과 초기화
                 st.session_state.recorder_count += 1  # 녹음 위젯 초기화
                 st.rerun()  # 초기 화면 다시 표시
@@ -1019,13 +1020,18 @@ with main_column:  # 본문 열에 표시
                 st.markdown('''<div class="voice-wave" aria-hidden="true"><svg viewBox="0 0 900 120" preserveAspectRatio="none"><defs><linearGradient id="waveGradient"><stop stop-color="#c8ddff" stop-opacity="0"/><stop offset=".2" stop-color="#b5d6ff" stop-opacity=".55"/><stop offset=".5" stop-color="#c4a0fa" stop-opacity=".7"/><stop offset=".75" stop-color="#f6bce6" stop-opacity=".65"/><stop offset="1" stop-color="#dfc9ff" stop-opacity="0"/></linearGradient></defs><path d="M0 60C110 60 112 43 175 48S275 82 348 64 405 39 450 50 526 77 590 60 667 47 740 56 835 60 900 60C780 67 740 57 675 69S550 80 475 62 410 53 350 66 235 59 170 61 60 60 0 60Z" fill="url(#waveGradient)"/><path d="M0 60C120 58 155 75 245 62S340 47 400 56 485 82 560 65 675 40 745 55 830 61 900 60C805 63 755 77 690 65S600 56 535 66 430 68 360 59 270 73 205 65 80 60 0 60Z" fill="url(#waveGradient)" opacity=".66"/></svg></div>''', unsafe_allow_html=True)  # 정적인 보라·파랑·분홍 파형
                 with st.container(key="voice_recorder"):  # 이 안의 실제 마이크 버튼을 둥글게 스타일링
                     audio_value = st.audio_input("음성 질문 녹음", key=f"mic_input_{st.session_state.recorder_count}", label_visibility="collapsed")  # Streamlit 기본 녹음 기능 그대로 사용
-                st.markdown('<p class="voice-hint">마이크를 눌러 녹음하고, 다시 눌러 마치세요</p>', unsafe_allow_html=True)  # 실제 녹음 조작 안내
-                with st.container(key="voice_submit"):  # 녹음했을 때만 전송 버튼 표시
-                    send_audio = st.button("녹음한 질문 보내기", use_container_width=True, type="primary", key="send_voice") if audio_value is not None else False  # 기존 제출 절차 유지
+                st.markdown('<p class="voice-hint">마이크를 다시 눌러 녹음을 마치면 질문을 자동으로 보내요</p>', unsafe_allow_html=True)  # 실제 녹음 조작 안내
             typed_question = st.chat_input("또는 글자로 질문해 주세요", key="typed_question")  # 마이크 없이도 질문 가능
 
             pending_question = None  # 이번에 보낼 질문 초기값
-            if send_audio and audio_value is not None:  # 녹음 제출 요청
+            audio_digest = hashlib.sha256(audio_value.getvalue()).hexdigest() if audio_value is not None else None
+            auto_submit_voice = (
+                audio_digest is not None
+                and audio_digest != st.session_state.get("processed_voice_digest")
+                and not typed_question
+            )
+            if auto_submit_voice:
+                st.session_state.processed_voice_digest = audio_digest
                 if client is None:  # API 키가 없는 경우
                     st.error("OPENAI_API_KEY 설정이 필요합니다.")  # 인증 안내
                 else:  # 음성 인식 가능
@@ -1051,13 +1057,15 @@ with main_column:  # 본문 열에 표시
                                 answer = ask_gpt(pending_question, meeting_text)
                             speech_bytes = preview_audio
                             st.session_state.command_audio_preview = preview_audio is not None
-                            st.session_state.command_audio_autoplay = preview_audio is not None
                             if st.session_state.use_tts and answer and speech_bytes is None:  # 음성 답변이 켜져 있다면
                                 try:  # 음성 변환 시도
                                     speech = client.audio.speech.create(model="gpt-4o-mini-tts", voice=st.session_state.voice, input=answer[:3500])  # 기존 TTS 사용
                                     speech_bytes = speech.content  # 음성 바이트 저장
                                 except Exception as error:  # 음성 변환만 실패했다면
                                     st.warning("텍스트 답변은 준비됐지만 음성 생성에 실패했습니다.")  # 텍스트 답변은 유지
+                            st.session_state.command_audio_autoplay = speech_bytes is not None and (
+                                auto_submit_voice or preview_audio is not None
+                            )
                             stage = "답변 저장"
                             st.session_state.last_question = pending_question  # 질문 갱신
                             st.session_state.last_answer = answer  # 답변 갱신
