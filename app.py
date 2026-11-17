@@ -20,7 +20,7 @@ from operator import itemgetter
 # =====================================================================
 # 0. 기본 설정
 # =====================================================================
-st.set_page_config(page_title="AIVLE ROADMAP AI", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AIVLE GUIDE", page_icon="🧭", layout="wide")
 
 # Streamlit Cloud: Secrets에 OPENAI_API_KEY 등록 시 환경변수로 연결
 try:
@@ -396,223 +396,55 @@ if st.session_state.chain is None:
 
 
 # =====================================================================
-# 5. 스타일 · 일러스트 (ROADMAP AI 테마: 베이지 + 민트 + 네이비)
+# 5. 스타일
 # =====================================================================
-MINT, MINT_D, NAVY, BEIGE, CREAM, SAND = "#45C4AE", "#2FA893", "#1F2A44", "#F3EEE6", "#FBF8F3", "#E4D8C6"
-
-st.markdown(f"""
+st.markdown("""
 <style>
-.stApp {{background: {BEIGE};}}
-header[data-testid="stHeader"] {{background: transparent;}}
-.block-container {{padding-top: 1.6rem; max-width: 1150px; position: relative; z-index: 1;}}
-section[data-testid="stSidebar"] {{background: {CREAM}; border-right: 1px solid {SAND};}}
-
-/* 배경 장식 원 */
-.deco {{position: fixed; border-radius: 50%; background: {SAND}; opacity: .75; z-index: 0; pointer-events: none;}}
-.deco.c1 {{width: 320px; height: 320px; right: -110px; top: -120px;}}
-.deco.c2 {{width: 70px; height: 70px; right: 230px; top: 60px; opacity: .6;}}
-.deco.c3 {{width: 90px; height: 46px; right: -20px; top: 260px; border-radius: 30px; opacity: .6;}}
-.deco.c4 {{width: 300px; height: 150px; left: -80px; bottom: -40px; border-radius: 0 150px 0 0; opacity: .6;}}
-.deco.c5 {{width: 180px; height: 70px; left: 90px; bottom: 40px; border-radius: 40px; opacity: .45;
-           transform: rotate(-35deg);}}
-
-/* 로고 */
-.logo {{display: flex; align-items: center; gap: 8px; font-weight: 800; color: {NAVY};}}
-.logo .name {{font-size: 1.45rem; letter-spacing: .5px;}}
-.logo .sub {{font-size: .85rem; font-weight: 700; margin-left: 4px; letter-spacing: .3px;}}
-.logo .sub b {{color: {MINT_D};}}
-
-/* 시작 화면 */
-.welcome {{text-align: center; margin-top: 4px;}}
-.welcome h1 {{color: {NAVY}; font-size: 2rem; font-weight: 800; margin: 0; padding: 0;}}
-.welcome p {{color: #4B5563; font-size: 1.05rem; margin: 6px 0 0 0;}}
-.robots {{display: flex; justify-content: center; align-items: flex-end; gap: 4px; margin: 14px 0 6px;}}
-.robots svg {{animation: float 3.2s ease-in-out infinite;}}
-.robots svg:nth-child(2) {{animation-delay: .4s;}}
-.robots svg:nth-child(3) {{animation-delay: .8s;}}
-@keyframes float {{0%,100% {{transform: translateY(0);}} 50% {{transform: translateY(-8px);}}}}
-
-/* 역할 카드 (st.container(key=...) 에 스타일 적용) */
-.st-key-card_applicant, .st-key-card_student {{
-    background: {CREAM}; border: 1px solid {SAND}; border-radius: 20px;
-    padding: 22px 22px 18px; box-shadow: 0 8px 22px rgba(80,60,30,.10);
-    transition: transform .18s ease, box-shadow .18s ease; position: relative;}}
-.st-key-card_applicant:hover, .st-key-card_student:hover {{
-    transform: translateY(-5px); box-shadow: 0 14px 30px rgba(80,60,30,.16);}}
-.role {{text-align: center; position: relative;}}
-.role .badge {{position: absolute; right: 0; top: -6px; width: 34px; height: 34px; border-radius: 50%;
-               background: #EFE6D8; display: flex; align-items: center; justify-content: center; font-size: 17px;}}
-.role h3 {{color: {NAVY}; font-size: 1.55rem; font-weight: 800; margin: 10px 0 2px; padding: 0;}}
-.role p {{color: #4B5563; margin: 0 0 4px;}}
-.role .tags {{margin-top: 8px;}}
-.chip {{display: inline-block; padding: 3px 10px; border-radius: 999px; background: #DDF3EE;
-        color: {MINT_D}; font-size: .78rem; margin: 2px 3px; font-weight: 700;}}
-.st-key-card_applicant button, .st-key-card_student button {{
-    background: {MINT}; color: white; border: none; border-radius: 999px; font-weight: 700; padding: .55rem 0;}}
-.st-key-card_applicant button:hover, .st-key-card_student button:hover {{background: {MINT_D}; color: white;}}
-
-/* 메인 화면 헤더 */
-.hero {{background: {CREAM}; border: 1px solid {SAND}; border-radius: 20px; padding: 18px 26px;
-        margin-bottom: 16px; display: flex; align-items: center; gap: 18px;
-        box-shadow: 0 6px 18px rgba(80,60,30,.08);}}
-.hero h2 {{color: {NAVY}; margin: 0; font-size: 1.5rem; font-weight: 800; padding: 0;}}
-.hero p {{color: #4B5563; margin: 4px 0 0; font-size: .95rem;}}
-.notice {{background: #FFF7ED; border-left: 4px solid #F59E0B; padding: 10px 14px;
-          border-radius: 8px; font-size: .9rem; color: #78350F;}}
-div[data-testid="stTabs"] button p {{font-size: 1.05rem; font-weight: 700;}}
-.stButton button[kind="primary"], .stFormSubmitButton button[kind="primary"] {{
-    background: {MINT}; border-color: {MINT}; color: white;}}
-.stButton button[kind="primary"]:hover, .stFormSubmitButton button[kind="primary"]:hover {{
-    background: {MINT_D}; border-color: {MINT_D};}}
+.block-container {padding-top: 2rem; max-width: 1150px;}
+.hero {background: linear-gradient(120deg, #E60012 0%, #B0001A 45%, #1F2937 100%);
+       color: white; padding: 28px 32px; border-radius: 18px; margin-bottom: 18px;}
+.hero h1 {color: white; margin: 0 0 6px 0; font-size: 2.1rem;}
+.hero p {color: #FDE8EA; margin: 0; font-size: 1.02rem;}
+.card {border: 1px solid #E5E7EB; border-radius: 16px; padding: 20px; height: 100%;
+       background: #FFFFFF; box-shadow: 0 2px 10px rgba(0,0,0,.04);}
+.card h3 {margin-top: 0;}
+.chip {display:inline-block; padding: 3px 10px; border-radius: 999px; background:#FEE2E2;
+       color:#B91C1C; font-size: .8rem; margin-right: 6px; font-weight:600;}
+.notice {background:#FFF7ED; border-left: 4px solid #F97316; padding: 10px 14px;
+         border-radius: 8px; font-size: .9rem; color:#7C2D12;}
+div[data-testid="stTabs"] button p {font-size: 1.05rem; font-weight: 600;}
 </style>
-<div class="deco c1"></div><div class="deco c2"></div><div class="deco c3"></div>
-<div class="deco c4"></div><div class="deco c5"></div>
 """, unsafe_allow_html=True)
-
-
-def logo_svg(size=34):
-    """AIVLE 로고 마크 (민트색 A 형태)"""
-    return f"""<svg width="{size}" height="{size}" viewBox="0 0 40 40">
-      <path d="M6 34 L20 6 L34 34" fill="none" stroke="{MINT}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M14 26 L26 26" stroke="{MINT}" stroke-width="4" stroke-linecap="round"/>
-      <circle cx="20" cy="18" r="2.6" fill="{NAVY}"/></svg>"""
-
-
-def logo_html():
-    return (f'<div class="logo">{logo_svg()}<span class="name">AIVLE</span>'
-            f'<span class="sub">ROADMAP <b>AI</b></span></div>')
-
-
-def robot_svg(kind="wave", size=170):
-    """마스코트 로봇: wave(인사), center(로고), grad(학사모·헤드셋)"""
-    O = NAVY
-    arm_l = '<rect x="10" y="98" width="17" height="42" rx="8.5" transform="rotate(38 18 132)" fill="white" stroke="{O}" stroke-width="3.5"/>'
-    arm_l_down = '<rect x="30" y="116" width="16" height="38" rx="8" transform="rotate(18 38 120)" fill="white" stroke="{O}" stroke-width="3.5"/>'
-    arm_r = '<rect x="133" y="98" width="17" height="42" rx="8.5" transform="rotate(-38 142 132)" fill="white" stroke="{O}" stroke-width="3.5"/>'
-    arm_r_down = '<rect x="114" y="116" width="16" height="38" rx="8" transform="rotate(-18 122 120)" fill="white" stroke="{O}" stroke-width="3.5"/>'
-    arms = {"wave": arm_l + arm_r_down, "center": arm_l_down + arm_r, "grad": arm_l_down + arm_r}[kind].format(O=O)
-
-    if kind == "center":
-        belly = (f'<path d="M70 150 L80 128 L90 150" fill="none" stroke="{MINT}" stroke-width="4.5" '
-                 f'stroke-linecap="round" stroke-linejoin="round"/><path d="M74 143 L86 143" stroke="{MINT}" '
-                 f'stroke-width="3.5" stroke-linecap="round"/>')
-    else:
-        belly = (f'<circle cx="80" cy="140" r="12" fill="{MINT}"/><path d="M74 140 L78.5 144.5 L86.5 135.5" '
-                 f'fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>')
-
-    extra = ""
-    if kind == "wave":   # 반짝 효과선
-        extra = (f'<g stroke="{O}" stroke-width="3" stroke-linecap="round"><path d="M14 52 L4 46"/>'
-                 f'<path d="M18 40 L12 28"/><path d="M28 34 L28 22"/></g>')
-    if kind == "grad":   # 학사모 + 헤드셋 마이크
-        extra = (f'<path d="M80 4 L132 22 L80 40 L28 22 Z" fill="{NAVY}"/>'
-                 f'<rect x="56" y="26" width="48" height="14" rx="4" fill="{NAVY}"/>'
-                 f'<path d="M132 22 L132 44" stroke="{NAVY}" stroke-width="2.5"/><circle cx="132" cy="47" r="4" fill="#F2B544"/>'
-                 f'<path d="M134 86 Q136 108 112 108" fill="none" stroke="{O}" stroke-width="3.5" stroke-linecap="round"/>'
-                 f'<circle cx="110" cy="108" r="4.5" fill="{O}"/>')
-    antenna = "" if kind == "grad" else (f'<line x1="80" y1="34" x2="80" y2="18" stroke="{O}" stroke-width="3.5"/>'
-                                          f'<circle cx="80" cy="14" r="6.5" fill="{MINT}" stroke="{O}" stroke-width="3"/>')
-
-    return f"""<svg width="{size}" height="{size * 1.2:.0f}" viewBox="0 0 160 200">
-      <ellipse cx="80" cy="191" rx="42" ry="6" fill="{SAND}"/>
-      {antenna}
-      {arms}
-      <rect x="58" y="160" width="17" height="24" rx="7" fill="white" stroke="{O}" stroke-width="3.5"/>
-      <rect x="85" y="160" width="17" height="24" rx="7" fill="white" stroke="{O}" stroke-width="3.5"/>
-      <rect x="46" y="110" width="68" height="58" rx="26" fill="white" stroke="{O}" stroke-width="3.5"/>
-      {belly}
-      <rect x="20" y="62" width="16" height="30" rx="8" fill="{MINT}" stroke="{O}" stroke-width="3"/>
-      <rect x="124" y="62" width="16" height="30" rx="8" fill="{MINT}" stroke="{O}" stroke-width="3"/>
-      <rect x="30" y="34" width="100" height="80" rx="38" fill="white" stroke="{O}" stroke-width="3.5"/>
-      <path d="M44 52 Q80 30 116 52" fill="none" stroke="{MINT}" stroke-width="7" stroke-linecap="round" opacity=".55"/>
-      <rect x="44" y="52" width="72" height="48" rx="23" fill="{NAVY}"/>
-      <path d="M58 76 Q65 66 72 76" fill="none" stroke="{MINT}" stroke-width="4.5" stroke-linecap="round"/>
-      <path d="M88 76 Q95 66 102 76" fill="none" stroke="{MINT}" stroke-width="4.5" stroke-linecap="round"/>
-      <path d="M72 84 Q80 93 88 84" fill="{MINT}" stroke="{MINT}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      {extra}
-    </svg>"""
-
-
-def applicant_svg(size=120):
-    """지원자: 정장 + 서류 파일"""
-    return f"""<svg width="{size}" height="{size}" viewBox="0 0 120 120">
-      <defs><clipPath id="cpA"><circle cx="60" cy="60" r="56"/></clipPath></defs>
-      <circle cx="60" cy="60" r="56" fill="#E9DFD0"/>
-      <g clip-path="url(#cpA)">
-        <path d="M18 120 Q20 82 60 80 Q100 82 102 120 Z" fill="#3B4A6B"/>
-        <path d="M50 80 L60 100 L70 80 Z" fill="white"/>
-        <path d="M57 84 L63 84 L62 104 L60 108 L58 104 Z" fill="{MINT}"/>
-        <rect x="53" y="66" width="14" height="16" rx="5" fill="#F4C9A3"/>
-        <ellipse cx="60" cy="52" rx="19" ry="22" fill="#F8D5B5"/>
-        <path d="M40 50 Q38 26 60 27 Q84 26 80 50 Q76 38 62 38 Q48 38 40 50 Z" fill="#3A2A20"/>
-        <circle cx="53" cy="54" r="2.2" fill="{NAVY}"/><circle cx="67" cy="54" r="2.2" fill="{NAVY}"/>
-        <path d="M54 63 Q60 68 66 63" fill="none" stroke="#B5684A" stroke-width="2" stroke-linecap="round"/>
-        <rect x="70" y="86" width="30" height="24" rx="3" fill="#F2B544" transform="rotate(-12 85 98)"/>
-        <rect x="68" y="90" width="30" height="24" rx="3" fill="#F7CC6A" transform="rotate(-6 83 102)"/>
-        <ellipse cx="74" cy="104" rx="7" ry="5" fill="#F8D5B5"/>
-      </g></svg>"""
-
-
-def student_svg(size=120):
-    """교육생: 후드티 + 노트북"""
-    return f"""<svg width="{size}" height="{size}" viewBox="0 0 120 120">
-      <defs><clipPath id="cpS"><circle cx="60" cy="60" r="56"/></clipPath></defs>
-      <circle cx="60" cy="60" r="56" fill="#E9DFD0"/>
-      <g clip-path="url(#cpS)">
-        <path d="M36 58 Q34 28 60 28 Q86 28 84 58 L86 80 L34 80 Z" fill="#5A3A28"/>
-        <path d="M16 120 Q20 82 60 80 Q100 82 104 120 Z" fill="{MINT}"/>
-        <path d="M50 80 Q60 90 70 80" fill="none" stroke="{MINT_D}" stroke-width="3"/>
-        <rect x="53" y="66" width="14" height="16" rx="5" fill="#F4C9A3"/>
-        <ellipse cx="60" cy="54" rx="18" ry="21" fill="#F8D5B5"/>
-        <path d="M42 50 Q44 32 60 32 Q78 32 78 50 Q68 42 58 40 Q50 44 42 50 Z" fill="#5A3A28"/>
-        <circle cx="53" cy="56" r="2.2" fill="{NAVY}"/><circle cx="67" cy="56" r="2.2" fill="{NAVY}"/>
-        <path d="M54 64 Q60 69 66 64" fill="none" stroke="#B5684A" stroke-width="2" stroke-linecap="round"/>
-        <path d="M24 96 L64 96 L70 118 L18 118 Z" fill="#B8C2CC"/>
-        <rect x="20" y="88" width="46" height="30" rx="3" fill="#CBD5DF" transform="skewX(-10)"/>
-        <circle cx="40" cy="103" r="3" fill="white" opacity=".8"/>
-      </g></svg>"""
-
-
-def svg_html(svg):
-    """st.markdown 안에서 SVG가 들여쓰기 때문에 코드블록으로 오인되지 않도록 한 줄로 정리"""
-    return re.sub(r">\s+<", "><", svg.strip()).replace("\n", " ")
 
 
 # =====================================================================
 # 6. 시작 화면: 지원자 / 교육생 구분 (기능 4)
 # =====================================================================
 if st.session_state.user_type is None:
-    st.markdown(svg_html(logo_html()), unsafe_allow_html=True)
-    st.markdown(svg_html(f"""
-    <div class="welcome">
-      <h1>에이블스쿨 ROADMAP AI에 오신 것을 환영합니다!</h1>
-      <p>해당하는 역할을 선택해 주세요.</p>
-      <div class="robots">{robot_svg("wave")}{robot_svg("center")}{robot_svg("grad")}</div>
-    </div>"""), unsafe_allow_html=True)
-
-    _, c1, c2, _ = st.columns([1, 2.2, 2.2, 1], gap="medium")
+    st.markdown("""
+    <div class="hero">
+      <h1>🧭 AIVLE GUIDE</h1>
+      <p>에이블스쿨 백서 기반 개인 맞춤형 AI 학습·생활 도우미 — 궁금한 것은 묻고, 나만의 학습 길을 찾아보세요.</p>
+    </div>""", unsafe_allow_html=True)
+    st.markdown("### 어떤 분이신가요?")
+    st.caption("선택에 따라 추천 질문과 답변 방식이 달라집니다. 이후 사이드바에서 언제든 바꿀 수 있어요.")
+    c1, c2 = st.columns(2)
     with c1:
-        with st.container(key="card_applicant"):
-            st.markdown(svg_html(f"""
-            <div class="role"><div class="badge">📋</div>{applicant_svg()}
-              <h3>지원자이신가요?</h3>
-              <p>지원 자격·일정·트랙을 함께 알아봐요</p>
-              <div class="tags"><span class="chip">지원 자격</span><span class="chip">모집 일정</span>
-              <span class="chip">트랙 선택</span></div></div>"""), unsafe_allow_html=True)
-            if st.button("지원자로 시작하기 →", key="start_applicant", width="stretch"):
-                st.session_state.user_type, st.session_state.level = "지원자", LEVELS["지원자"][0]
-                st.rerun()
+        st.markdown("""<div class="card"><h3>🌱 예비 지원자</h3>
+        <span class="chip">지원 자격</span><span class="chip">모집 일정</span><span class="chip">트랙 선택</span>
+        <p style="margin-top:12px">에이블스쿨이 궁금하고 지원을 고민하고 있어요.</p></div>""",
+                    unsafe_allow_html=True)
+        if st.button("지원자로 시작하기", type="primary", width="stretch"):
+            st.session_state.user_type, st.session_state.level = "지원자", LEVELS["지원자"][0]
+            st.rerun()
     with c2:
-        with st.container(key="card_student"):
-            st.markdown(svg_html(f"""
-            <div class="role"><div class="badge">🎓</div>{student_svg()}
-              <h3>교육생이신가요?</h3>
-              <p>학습과 프로젝트를 함께 완주해요</p>
-              <div class="tags"><span class="chip">학습 로드맵</span><span class="chip">퀴즈</span>
-              <span class="chip">문제 해결</span></div></div>"""), unsafe_allow_html=True)
-            if st.button("교육생으로 시작하기 →", key="start_student", width="stretch"):
-                st.session_state.user_type, st.session_state.level = "교육생", LEVELS["교육생"][0]
-                st.rerun()
+        st.markdown("""<div class="card"><h3>🚀 교육생</h3>
+        <span class="chip">학습 로드맵</span><span class="chip">퀴즈</span><span class="chip">문제 해결</span>
+        <p style="margin-top:12px">지금 교육을 받으며 학습·출결·프로젝트 도움이 필요해요.</p></div>""",
+                    unsafe_allow_html=True)
+        if st.button("교육생으로 시작하기", type="primary", width="stretch"):
+            st.session_state.user_type, st.session_state.level = "교육생", LEVELS["교육생"][0]
+            st.rerun()
     st.stop()
 
 
@@ -682,13 +514,11 @@ with st.sidebar:
 # 8. 헤더
 # =====================================================================
 emoji = "🌱" if st.session_state.user_type == "지원자" else "🚀"
-robot = robot_svg("wave" if st.session_state.user_type == "지원자" else "grad", size=78)
-st.markdown(svg_html(logo_html()), unsafe_allow_html=True)
-st.markdown(svg_html(f"""
-<div class="hero">{robot}
-  <div><h2>{emoji} {level_text()} 모드</h2>
-  <p>정보를 이해하고 → 나에게 맞는 계획을 세우고 → 학습·점검하고 → 실제 문제를 해결해요.</p></div>
-</div>"""), unsafe_allow_html=True)
+st.markdown(f"""
+<div class="hero">
+  <h1>🧭 AIVLE GUIDE</h1>
+  <p>{emoji} {level_text()} 모드 · 정보를 이해하고 → 나에게 맞는 계획을 세우고 → 학습·점검하고 → 실제 문제를 해결해요.</p>
+</div>""", unsafe_allow_html=True)
 
 if st.session_state.chain is None:
     st.warning("벡터 저장소(chroma_db)를 찾지 못했어요. 왼쪽 사이드바에서 **백서 PDF를 업로드**해 주세요.")
